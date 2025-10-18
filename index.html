@@ -175,17 +175,51 @@
     const setStatus = (m)=>{ $('status').textContent = 'Status: ' + m; console.log('[CalTrack]', m); };
     const OFF_PRODUCT = (code)=>`https://world.openfoodfacts.org/api/v2/product/${code}.json`;
     // Global search (no country filter), supports pagination & nocache
- // Countries filter: SA, UK, US (OR with `|` per OFF v2 docs)
+// Countries: SA OR UK OR US (OFF v2 supports OR with pipes)
 const COUNTRIES_OR = 'en:south-africa|en:united-kingdom|en:united-states';
 
-// Relevance-ranked search (paged) with country filter
-const OFF_SEARCH = (q, page=1, pageSize=24) =>
-  `https://world.openfoodfacts.org/api/v2/search?` +
-  `fields=code,product_name,brands,image_small_url&` +
-  `search_terms=${encodeURIComponent(q)}&` +                   // free-text
-  `countries_tags=${encodeURIComponent(COUNTRIES_OR)}&` +     // SA OR UK OR US
-  `page_size=${pageSize}&page=${page}&` +                     // pagination
-  `sort_by=relevance&locale=en&nocache=1`;                    // most relevant first
+// Quick brand tag guesser: turns "coca cola" -> "coca-cola", "pepsi" -> "pepsi"
+function brandTagFromQuery(q){
+  const s = q.trim().toLowerCase();
+  // simple brand patterns you care about (add more as you like)
+  if(/(^|\b)coke(\b|$)/.test(s) || /coca\s*-?\s*cola/.test(s)) return 'coca-cola';
+  if(/\bpepsi(co)?\b/.test(s)) return 'pepsi';
+  if(/\bfanta\b/.test(s)) return 'fanta';
+  if(/\bsprite\b/.test(s)) return 'sprite';
+  if(/\bnestl[eé]\b/.test(s)) return 'nestle';
+  if(/\bmonster\b/.test(s)) return 'monster';
+  if(/\bred\s*bull\b/.test(s)) return 'red-bull';
+  return null;
+}
+
+// Build a relevance-first OFF v2 search
+function OFF_SEARCH(q, page=1, pageSize=24){
+  const brand = brandTagFromQuery(q);                // e.g. 'coca-cola'
+  const params = new URLSearchParams({
+    fields: 'code,product_name,brands,image_small_url',
+    search_terms: q,                                 // free-text (ElasticSearch)
+    page_size: String(pageSize),
+    page: String(page),
+    locale: 'en',
+    nocache: '1'
+  });
+
+  // Country OR filter (SA, UK, US)
+  params.set('countries_tags', COUNTRIES_OR);
+
+  // If we detect a brand in the query, hint the brand to the search engine
+  // This dramatically improves “coca cola” / “pepsi” style queries.
+  if(brand){
+    // v2 accepts simplified tag params; brands_tags_en uses English taxonomy
+    params.set('brands_tags_en', brand);
+  }
+
+  // Let ES rank by relevance when search_terms is present.
+  // (You can force a deterministic fallback by uncommenting next line)
+  // params.set('sort_by', 'product_name');
+
+  return `https://world.openfoodfacts.org/api/v2/search?${params.toString()}`;
+}
 
     const secureOK = ()=> location.protocol==='https:' || location.hostname==='localhost' || location.hostname==='127.0.0.1';
     const round1 = n => Math.round(n*10)/10;
