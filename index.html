@@ -1,0 +1,707 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>CalTrack — Barcode Calorie Tracker</title>
+  <meta name="description" content="Track calories with barcode scanning using the Open Food Facts API. Single-file web app for Vercel/GitHub Pages." />
+  <!-- Tailwind CSS -->
+  <script src="https://cdn.tailwindcss.com"></script>
+  <style>
+    /* Small helper to hide number input spinners on some browsers */
+    input[type=number]::-webkit-inner-spin-button,
+    input[type=number]::-webkit-outer-spin-button { -webkit-appearance: none; margin: 0; }
+    input[type=number] { -moz-appearance: textfield; }
+  </style>
+</head>
+<body class="min-h-screen bg-slate-50 text-slate-900">
+  <div class="max-w-5xl mx-auto p-4 md:p-8">
+    <!-- Header -->
+    <header class="flex flex-col md:flex-row items-start md:items-center justify-between gap-3 mb-6">
+      <div>
+        <h1 class="text-3xl font-bold tracking-tight">CalTrack</h1>
+        <p class="text-slate-600">Scan a barcode ➜ fetch nutrition ➜ add servings ➜ track your day. Powered by <a href="https://world.openfoodfacts.org/" target="_blank" class="underline">Open Food Facts</a>.</p>
+      </div>
+      <div class="flex items-center gap-3">
+        <label class="text-sm text-slate-600 hidden sm:block">Date</label>
+        <input id="datePicker" type="date" class="px-3 py-2 rounded-xl border border-slate-300 bg-white shadow-sm focus:outline-none focus:ring-2 focus:ring-slate-400" />
+        <button id="newDayBtn" class="px-4 py-2 rounded-2xl bg-slate-900 text-white shadow hover:opacity-90">Today</button>
+      </div>
+    </header>
+
+    <!-- Stats Cards -->
+    <section class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
+      <div class="rounded-2xl bg-white p-4 shadow">
+        <div class="text-sm text-slate-500">Calories (kcal)</div>
+        <div id="statCalories" class="text-3xl font-semibold">0</div>
+      </div>
+      <div class="rounded-2xl bg-white p-4 shadow">
+        <div class="text-sm text-slate-500">Protein (g)</div>
+        <div id="statProtein" class="text-3xl font-semibold">0</div>
+      </div>
+      <div class="rounded-2xl bg-white p-4 shadow">
+        <div class="text-sm text-slate-500">Carbs (g)</div>
+        <div id="statCarbs" class="text-3xl font-semibold">0</div>
+      </div>
+      <div class="rounded-2xl bg-white p-4 shadow">
+        <div class="text-sm text-slate-500">Fat (g)</div>
+        <div id="statFat" class="text-3xl font-semibold">0</div>
+      </div>
+    </section>
+
+    <!-- Goal & Progress -->
+    <section class="rounded-2xl bg-white p-4 shadow mb-6">
+      <div class="flex items-end gap-4 flex-wrap">
+        <div class="grow">
+          <div class="flex items-center justify-between gap-4">
+            <h2 class="text-lg font-semibold">Daily Goal</h2>
+            <div class="flex items-center gap-2">
+              <label for="goalInput" class="text-sm text-slate-600">Goal (kcal)</label>
+              <input id="goalInput" type="number" min="500" step="50" class="px-3 py-2 rounded-xl border border-slate-300 bg-white shadow-sm w-32" />
+            </div>
+          </div>
+          <div class="mt-3">
+            <div class="h-3 w-full bg-slate-100 rounded-full overflow-hidden border border-slate-200">
+              <div id="goalBar" class="h-full w-0 rounded-full bg-emerald-600"></div>
+            </div>
+            <div class="mt-2 text-sm text-slate-600">
+              <span id="goalText">0 / 0 kcal</span>
+              ·
+              <span id="goalRemaining">0 kcal remaining</span>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- Scanner & Search -->
+    <section class="grid grid-cols-1 lg:grid-cols-5 gap-6 mb-6">
+      <div class="lg:col-span-3 rounded-2xl bg-white p-4 shadow">
+        <div class="flex items-center justify-between mb-3">
+          <h2 class="text-lg font-semibold">Barcode Scanner</h2>
+          <div class="flex items-center gap-2">
+            <select id="cameraSelect" class="px-3 py-2 rounded-xl border border-slate-300 bg-white shadow-sm"></select>
+            <button id="toggleScanBtn" class="px-3 py-2 rounded-xl border border-slate-300 bg-white hover:bg-slate-100">Start</button>
+          </div>
+        </div>
+        <div class="aspect-video rounded-xl overflow-hidden bg-slate-100 border border-slate-200 relative">
+          <video id="video" class="w-full h-full object-cover" playsinline muted></video>
+          <div class="absolute inset-0 pointer-events-none flex items-center justify-center">
+            <div class="w-48 h-48 rounded-2xl border-4 border-white/80 shadow-[0_0_0_200vmax_rgba(0,0,0,0.35)]"></div>
+          </div>
+        </div>
+        <p id="scanStatus" class="mt-2 text-sm text-slate-500">Scanner idle.</p>
+      </div>
+
+      <div class="lg:col-span-2 rounded-2xl bg-white p-4 shadow">
+        <h2 class="text-lg font-semibold mb-3">Find a Product</h2>
+        <div class="flex gap-2 mb-3">
+          <input id="manualBarcode" type="text" inputmode="numeric" placeholder="Enter barcode (EAN/UPC)" class="flex-1 px-3 py-2 rounded-xl border border-slate-300 bg-white shadow-sm" />
+          <button id="lookupBtn" class="px-4 py-2 rounded-2xl bg-slate-900 text-white">Lookup</button>
+        </div>
+        <div class="flex gap-2">
+          <input id="searchQuery" type="text" placeholder="Search by name (Open Food Facts)" class="flex-1 px-3 py-2 rounded-xl border border-slate-300 bg-white shadow-sm" />
+          <button id="searchBtn" class="px-4 py-2 rounded-2xl border border-slate-300 bg-white">Search</button>
+        </div>
+        <ul id="searchResults" class="mt-3 space-y-2"></ul>
+      </div>
+    </section>
+
+    <!-- Product Card -->
+    <section id="productSection" class="hidden rounded-2xl bg-white p-4 shadow mb-6">
+      <div class="flex flex-col md:flex-row gap-4">
+        <img id="productImage" class="w-32 h-32 object-cover rounded-xl border border-slate-200" alt="Product image" />
+        <div class="flex-1">
+          <h3 id="productName" class="text-xl font-semibold">—</h3>
+          <p id="productBrand" class="text-slate-600">—</p>
+          <p id="productBarcode" class="text-xs text-slate-500">—</p>
+          <div class="grid grid-cols-2 sm:grid-cols-4 gap-3 mt-3">
+            <div class="p-3 rounded-xl bg-slate-50 border border-slate-200"><div class="text-xs text-slate-500">kcal/100g</div><div id="kcal100" class="text-lg font-semibold">—</div></div>
+            <div class="p-3 rounded-xl bg-slate-50 border border-slate-200"><div class="text-xs text-slate-500">Protein/100g</div><div id="prot100" class="text-lg font-semibold">— g</div></div>
+            <div class="p-3 rounded-xl bg-slate-50 border border-slate-200"><div class="text-xs text-slate-500">Carbs/100g</div><div id="carb100" class="text-lg font-semibold">— g</div></div>
+            <div class="p-3 rounded-xl bg-slate-50 border border-slate-200"><div class="text-xs text-slate-500">Fat/100g</div><div id="fat100" class="text-lg font-semibold">— g</div></div>
+          </div>
+        </div>
+      </div>
+      <div class="mt-4 grid grid-cols-1 md:grid-cols-3 gap-3">
+        <div>
+          <label class="text-sm text-slate-600">Serving (g/ml)</label>
+          <input id="servingGrams" type="number" min="1" step="1" value="100" class="mt-1 w-full px-3 py-2 rounded-xl border border-slate-300 bg-white shadow-sm" />
+        </div>
+        <div>
+          <label class="text-sm text-slate-600">Quantity</label>
+          <input id="servingQty" type="number" min="1" step="1" value="1" class="mt-1 w-full px-3 py-2 rounded-xl border border-slate-300 bg-white shadow-sm" />
+        </div>
+        <div class="flex items-end gap-2">
+          <button id="addToLogBtn" class="w-full px-4 py-3 rounded-2xl bg-emerald-600 text-white font-medium shadow">Add to Log</button>
+        </div>
+      </div>
+    </section>
+
+    <!-- Daily Log -->
+    <section class="rounded-2xl bg-white p-4 shadow">
+      <div class="flex items-center justify-between mb-3">
+        <h2 class="text-lg font-semibold">Daily Log</h2>
+        <button id="clearDayBtn" class="px-3 py-2 rounded-xl border border-slate-300 bg-white hover:bg-slate-100">Clear Day</button>
+      </div>
+      <div class="overflow-x-auto">
+        <table class="min-w-full text-sm">
+          <thead>
+            <tr class="text-left text-slate-500 border-b">
+              <th class="py-2 pr-2">Item</th>
+              <th class="py-2 pr-2">Brand</th>
+              <th class="py-2 pr-2">Qty</th>
+              <th class="py-2 pr-2">g/ml</th>
+              <th class="py-2 pr-2">kcal</th>
+              <th class="py-2 pr-2">P (g)</th>
+              <th class="py-2 pr-2">C (g)</th>
+              <th class="py-2 pr-2">F (g)</th>
+              <th class="py-2">—</th>
+            </tr>
+          </thead>
+          <tbody id="logBody"></tbody>
+        </table>
+      </div>
+    </section>
+
+    <footer class="text-xs text-slate-500 mt-6">
+      <p>Note: Camera access requires HTTPS (e.g., Vercel/GitHub Pages) or http://localhost when testing locally.</p>
+    </footer>
+  </div>
+
+  <!-- ZXing for barcode scanning -->
+  <script src="https://unpkg.com/@zxing/library@latest"></script>
+  <script>
+    // --- Constants (declared once)
+    const OFF_PRODUCT = (barcode) => `https://world.openfoodfacts.org/api/v2/product/${barcode}.json`;
+    const OFF_SEARCH = (q) => `https://world.openfoodfacts.org/api/v2/search?fields=code,product_name,brands,image_small_url&countries_tags_en=South%20Africa&locale=en&sort_by=unique_scans_n&page_size=10&general_search_term=${encodeURIComponent(q)}`;
+
+    // --- State
+    let selectedDate = new Date().toISOString().slice(0,10);
+    let currentProduct = null;
+    let codeReader = null;
+    let currentDeviceId = null;
+    let scanning = false;
+
+    // --- Elements
+    const datePicker = document.getElementById('datePicker');
+    const newDayBtn = document.getElementById('newDayBtn');
+    const statCalories = document.getElementById('statCalories');
+    const statProtein = document.getElementById('statProtein');
+    const statCarbs   = document.getElementById('statCarbs');
+    const statFat     = document.getElementById('statFat');
+
+    const cameraSelect = document.getElementById('cameraSelect');
+    const videoEl = document.getElementById('video');
+    const scanStatus = document.getElementById('scanStatus');
+    const toggleScanBtn = document.getElementById('toggleScanBtn');
+
+    const manualBarcode = document.getElementById('manualBarcode');
+    const lookupBtn = document.getElementById('lookupBtn');
+    const searchQuery = document.getElementById('searchQuery');
+    const searchBtn = document.getElementById('searchBtn');
+    const searchResults = document.getElementById('searchResults');
+
+    const productSection = document.getElementById('productSection');
+    const productImage = document.getElementById('productImage');
+    const productName = document.getElementById('productName');
+    const productBrand = document.getElementById('productBrand');
+    const productBarcode = document.getElementById('productBarcode');
+    const kcal100 = document.getElementById('kcal100');
+    const prot100 = document.getElementById('prot100');
+    const carb100 = document.getElementById('carb100');
+    const fat100 = document.getElementById('fat100');
+    const servingGrams = document.getElementById('servingGrams');
+    const servingQty = document.getElementById('servingQty');
+    const addToLogBtn = document.getElementById('addToLogBtn');
+
+    const logBody = document.getElementById('logBody');
+    const clearDayBtn = document.getElementById('clearDayBtn');
+
+    // Goal/progress elements
+    const goalInput = document.getElementById('goalInput');
+    const goalBar = document.getElementById('goalBar');
+    const goalText = document.getElementById('goalText');
+    const goalRemaining = document.getElementById('goalRemaining');
+
+    // --- Utilities
+    function isSecureOk(){
+      return location.protocol === 'https:' || location.hostname === 'localhost' || location.hostname === '127.0.0.1';
+    }
+    function getSavedCameraId(){ return localStorage.getItem('caltrack:camId') || null; }
+    function setSavedCameraId(id){ if(id) localStorage.setItem('caltrack:camId', id); }
+
+    function lsKey(dateStr) { return `caltrack:${dateStr}`; }
+    function getDayLog(dateStr) { const raw = localStorage.getItem(lsKey(dateStr)); return raw ? JSON.parse(raw) : []; }
+    function setDayLog(dateStr, arr) { localStorage.setItem(lsKey(dateStr), JSON.stringify(arr)); }
+    function sumMacros(items) {
+      const s = items.reduce((acc, it) => { acc.kcal += it.kcal; acc.prot += it.protein; acc.carb += it.carbs; acc.fat += it.fat; return acc; }, {kcal:0, prot:0, carb:0, fat:0});
+      return s;
+    }
+    function round1(n){ return Math.round(n * 10) / 10; }
+    function showToast(msg){ const t = document.createElement('div'); t.className = 'fixed bottom-4 left-1/2 -translate-x-1/2 bg-slate-900 text-white px-4 py-2 rounded-2xl shadow'; t.textContent = msg; document.body.appendChild(t); setTimeout(()=> t.remove(), 2200); }
+
+    // --- Goal helpers
+    function getGoal(){ const v = Number(localStorage.getItem('caltrack:goal')); return Number.isFinite(v) && v > 0 ? v : 2500; }
+    function setGoal(v){ if(!Number.isFinite(v) || v <= 0) return; localStorage.setItem('caltrack:goal', String(Math.round(v))); }
+    function updateProgress(){
+      if(!goalBar) return;
+      const goal = getGoal();
+      const consumed = Number(statCalories.textContent) || 0;
+      const pct = goal ? Math.max(0, Math.min(100, (consumed/goal)*100)) : 0;
+      goalBar.style.width = pct + '%';
+      goalText.textContent = `${Math.round(consumed)} / ${Math.round(goal)} kcal`;
+      const diff = Math.round(goal - consumed);
+      goalRemaining.textContent = diff >= 0 ? `${diff} kcal remaining` : `${Math.abs(diff)} kcal over`;
+      goalBar.className = 'h-full rounded-full ' + (diff >= 0 ? 'bg-emerald-600' : 'bg-red-500');
+    }
+
+    // --- UI: Date handling
+    function setDate(dateStr){ selectedDate = dateStr; datePicker.value = dateStr; renderLog(); }
+
+    // --- Renderers
+    function renderLog(){
+      const items = getDayLog(selectedDate);
+      logBody.innerHTML = '';
+      items.forEach((it, idx) => {
+        const tr = document.createElement('tr');
+        tr.className = 'border-b last:border-0';
+        tr.innerHTML = `
+          <td class="py-2 pr-2">${it.name}</td>
+          <td class="py-2 pr-2">${it.brand || '—'}</td>
+          <td class="py-2 pr-2">${it.qty}</td>
+          <td class="py-2 pr-2">${it.grams}</td>
+          <td class="py-2 pr-2">${Math.round(it.kcal)}</td>
+          <td class="py-2 pr-2">${round1(it.protein)}</td>
+          <td class="py-2 pr-2">${round1(it.carbs)}</td>
+          <td class="py-2 pr-2">${round1(it.fat)}</td>
+          <td class="py-2"><button data-idx="${idx}" class="delBtn px-2 py-1 rounded-lg bg-red-50 text-red-700 border border-red-200">Remove</button></td>`;
+        logBody.appendChild(tr);
+      });
+      const s = sumMacros(items);
+      statCalories.textContent = Math.round(s.kcal);
+      statProtein.textContent = round1(s.prot);
+      statCarbs.textContent   = round1(s.carb);
+      statFat.textContent     = round1(s.fat);
+      updateProgress();
+      document.querySelectorAll('.delBtn').forEach(btn => {
+        btn.addEventListener('click', (e)=>{ const i = Number(e.currentTarget.getAttribute('data-idx')); const cur = getDayLog(selectedDate); cur.splice(i,1); setDayLog(selectedDate, cur); renderLog(); });
+      });
+    }
+
+    function showProduct(p){
+      currentProduct = p; productSection.classList.remove('hidden');
+      productImage.src = p.image || 'https://static.openfoodfacts.org/images/icons/dist/packaging.svg';
+      productName.textContent = p.name || 'Unknown product';
+      productBrand.textContent = p.brand || '';
+      productBarcode.textContent = `Barcode: ${p.code || '—'}`;
+      kcal100.textContent = p.kcal100 != null ? Math.round(p.kcal100) : '—';
+      prot100.textContent = p.prot100 != null ? `${round1(p.prot100)} g` : '— g';
+      carb100.textContent = p.carb100 != null ? `${round1(p.carb100)} g` : '— g';
+      fat100.textContent  = p.fat100  != null ? `${round1(p.fat100)} g`  : '— g';
+    }
+
+    function productFromOFF(data){
+      const prod = data?.product || {};
+      const n = prod.nutriments || {};
+      const get = (k) => typeof n[k] === 'number' ? n[k] : (n[k] ? Number(n[k]) : undefined);
+      const kcal = get('energy-kcal_100g') ?? get('energy-kcal_value') ?? ((get('energy_100g') ?? 0) / 4.184);
+      return { code: prod.code, name: prod.product_name || prod.generic_name || 'Unknown', brand: prod.brands || '', image: prod.image_front_small_url || prod.image_small_url || prod.image_url, kcal100: (kcal ?? undefined), prot100: get('proteins_100g'), carb100: get('carbohydrates_100g'), fat100: get('fat_100g') };
+    }
+
+    // --- API calls
+    async function fetchByBarcode(barcode){
+      scanStatus.textContent = `Looking up ${barcode}…`;
+      const r = await fetch(OFF_PRODUCT(barcode));
+      const j = await r.json();
+      if(j.status !== 1) throw new Error('Product not found');
+      const p = productFromOFF(j);
+      showProduct(p);
+      scanStatus.textContent = `Found: ${p.name}`;
+      return p;
+    }
+    async function searchOFF(q){
+      const r = await fetch(OFF_SEARCH(q));
+      const j = await r.json();
+      const arr = (j.products || []).map(p => ({ code: p.code, name: p.product_name || 'Unknown', brand: p.brands || '', image: p.image_small_url }));
+      return arr;
+    }
+
+    // --- Add to log
+    function addCurrentToLog(){
+      if(!currentProduct) return;
+      const grams = Math.max(1, Number(servingGrams.value) || 0);
+      const qty   = Math.max(1, Number(servingQty.value) || 0);
+      const ratio = (grams / 100) * qty;
+      const kcal = (currentProduct.kcal100 ?? 0) * ratio;
+      const protein = (currentProduct.prot100 ?? 0) * ratio;
+      const carbs   = (currentProduct.carb100 ?? 0) * ratio;
+      const fat     = (currentProduct.fat100  ?? 0) * ratio;
+      const item = { code: currentProduct.code, name: currentProduct.name, brand: currentProduct.brand, grams, qty, kcal, protein, carbs, fat };
+      const cur = getDayLog(selectedDate); cur.push(item); setDayLog(selectedDate, cur); renderLog(); showToast('Added to log');
+    }
+
+    // --- Cameras (ZXing)
+    async function listCameras(){
+      try {
+        const devices = await ZXing.BrowserMultiFormatReader.listVideoInputDevices();
+        cameraSelect.innerHTML = '';
+        devices.forEach((d,i)=>{ const opt = document.createElement('option'); opt.value = d.deviceId; opt.textContent = d.label || `Camera ${i+1}`; cameraSelect.appendChild(opt); });
+        if(devices.length === 0){ scanStatus.textContent = 'No cameras found. Grant permission and reload.'; return; }
+        const saved = getSavedCameraId();
+        const preferred = devices.find(d => d.deviceId === saved) || devices.find(d => /back|rear|environment/i.test(d.label)) || devices[0];
+        currentDeviceId = preferred.deviceId; cameraSelect.value = preferred.deviceId;
+      } catch(e){ console.warn('Camera list error', e); }
+    }
+
+    async function startScanner(){
+      if(scanning) return;
+      if(!isSecureOk()){ scanStatus.textContent = 'Camera requires HTTPS or http://localhost. Use Vercel, GitHub Pages, ngrok, or localhost.'; showToast('Use HTTPS or localhost to enable camera'); return; }
+      scanning = true; scanStatus.textContent = 'Requesting camera permission…'; if(!codeReader) codeReader = new ZXing.BrowserMultiFormatReader();
+      try{
+        const stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: { ideal: 'environment' } } });
+        stream.getTracks().forEach(t=>t.stop());
+        await listCameras();
+        const constraints = currentDeviceId ? { video: { deviceId: { exact: currentDeviceId } } } : { video: { facingMode: { ideal: 'environment' } } };
+        scanStatus.textContent = 'Starting scanner…';
+        await codeReader.decodeFromConstraints(constraints, videoEl, (result, err)=>{
+          if(result){ const code = result.getText(); scanStatus.textContent = `Scanned: ${code}`; stopScanner(); fetchByBarcode(code).catch(e=>{ scanStatus.textContent = e.message; showToast(e.message); }); }
+          if(err && !(err instanceof ZXing.NotFoundException)) console.warn(err);
+        });
+        toggleScanBtn.textContent = 'Stop'; scanStatus.textContent = 'Scanner running… Aim at barcode';
+      }catch(e){
+        scanning = false; toggleScanBtn.textContent = 'Start';
+        let msg = 'Failed to start scanner. '; if(e.name === 'NotAllowedError') msg += 'Camera permission denied. Allow access and try again.'; else if(e.name === 'NotFoundError') msg += 'No camera found on this device.'; else if(e.name === 'NotReadableError') msg += 'Camera is in use by another app.'; else if(e.message) msg += e.message; else msg += 'Check permissions/HTTPS.'; scanStatus.textContent = msg; showToast(msg);
+      }
+    }
+    function stopScanner(){ if(codeReader){ codeReader.reset(); } scanning = false; toggleScanBtn.textContent = 'Start'; scanStatus.textContent = 'Scanner idle.'; }
+
+    // --- Events
+    if(goalInput){
+      goalInput.addEventListener('change', ()=>{ const v = Number(goalInput.value); setGoal(v); updateProgress(); });
+      goalInput.addEventListener('input', ()=>{ const v = Number(goalInput.value); if(Number.isFinite(v)) updateProgress(); });
+    }
+    datePicker.addEventListener('change', (e)=> setDate(e.target.value));
+    newDayBtn.addEventListener('click', ()=> setDate(new Date().toISOString().slice(0,10)) );
+
+    cameraSelect.addEventListener('change', (e)=> { currentDeviceId = e.target.value; setSavedCameraId(currentDeviceId); if(scanning){ stopScanner(); startScanner(); } });
+    toggleScanBtn.addEventListener('click', ()=> scanning ? stopScanner() : startScanner());
+
+    lookupBtn.addEventListener('click', ()=>{ const code = manualBarcode.value.trim(); if(!code) return; fetchByBarcode(code).catch(e=>{ scanStatus.textContent = e.message; showToast(e.message); }); });
+    searchBtn.addEventListener('click', async ()=>{
+      const q = searchQuery.value.trim(); if(!q) return; searchResults.innerHTML = '<li class="text-sm text-slate-500">Searching…</li>';
+      try{
+        const arr = await searchOFF(q); if(arr.length === 0){ searchResults.innerHTML = '<li class="text-sm text-slate-500">No results.</li>'; return; }
+        searchResults.innerHTML = '';
+        arr.forEach(p=>{ const li = document.createElement('li'); li.className = 'p-2 border border-slate-200 rounded-xl hover:bg-slate-50 cursor-pointer flex items-center gap-3'; li.innerHTML = `<img src="${p.image || 'https://static.openfoodfacts.org/images/icons/dist/packaging.svg'}" class="w-10 h-10 object-cover rounded-lg border"/><div class="flex-1"><div class="font-medium">${p.name}</div><div class="text-xs text-slate-500">${p.brand || ''} · ${p.code}</div></div>`; li.addEventListener('click', ()=> fetchByBarcode(p.code).catch(e=> showToast(e.message)) ); searchResults.appendChild(li); });
+      }catch(e){ searchResults.innerHTML = `<li class="text-sm text-red-600">${e.message}</li>`; }
+    });
+
+    addToLogBtn.addEventListener('click', addCurrentToLog);
+    clearDayBtn.addEventListener('click', ()=>{ if(confirm('Clear all entries for this day?')){ setDayLog(selectedDate, []); renderLog(); } });
+
+    // Init
+    (async function init(){
+      setDate(selectedDate);
+      if(!isSecureOk()) scanStatus.textContent = 'Camera blocked: use HTTPS (Vercel/GitHub Pages) or http://localhost.';
+      try { await listCameras(); } catch(e) { console.warn(e); }
+      if(goalInput){ goalInput.value = getGoal(); }
+      updateProgress();
+      runTests(); // lightweight sanity tests
+    })();
+
+    // --- Lightweight tests (run in console)
+    function runTests(){
+      try {
+        // Test 1: productFromOFF converts kJ -> kcal
+        const mock = { product: { code: 'x', product_name: 'Mock', brands: 'Test', nutriments: { energy_100g: 418.4, proteins_100g: 10, carbohydrates_100g: 20, fat_100g: 5 } } };
+        const p = productFromOFF(mock);
+        console.assert(Math.round(p.kcal100) === 100, 'kJ→kcal conversion failed');
+
+        // Test 2: sumMacros totals correctly
+        const sums = sumMacros([{kcal:100, protein:10, carbs:20, fat:5},{kcal:50, protein:5, carbs:10, fat:2}]);
+        console.assert(sums.kcal===150 && sums.prot===15 && sums.carb===30 && sums.fat===7, 'sumMacros failed');
+
+        // Test 3: goal persistence
+        const old = getGoal(); setGoal(2222); console.assert(getGoal()===2222, 'set/get goal failed'); setGoal(old);
+
+        // Test 4: OFF URLs format
+        console.assert(OFF_PRODUCT('123').includes('/product/123'), 'OFF_PRODUCT wrong');
+        console.assert(OFF_SEARCH('milk').includes('general_search_term='), 'OFF_SEARCH wrong');
+
+        console.log('%cCalTrack tests passed','color:green');
+      } catch (e){ console.warn('CalTrack tests error', e); }
+    <header class="flex flex-col md:flex-row items-start md:items-center justify-between gap-3 mb-6">
+      <div>
+        <h1 class="text-3xl font-bold tracking-tight">CalTrack</h1>
+        <p class="text-slate-600">Scan a barcode ➜ fetch nutrition ➜ add servings ➜ track your day. Powered by <a href="https://world.openfoodfacts.org/" target="_blank" class="underline">Open Food Facts</a>.</p>
+      </div>
+      <div class="flex items-center gap-3">
+        <label class="text-sm text-slate-600 hidden sm:block">Date</label>
+        <input id="datePicker" type="date" class="px-3 py-2 rounded-xl border border-slate-300 bg-white shadow-sm focus:outline-none focus:ring-2 focus:ring-slate-400" />
+        <button id="newDayBtn" class="px-4 py-2 rounded-2xl bg-slate-900 text-white shadow hover:opacity-90">Today</button>
+      </div>
+    </header>
+
+    <!-- Stats Cards -->
+    <section class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
+      <div class="rounded-2xl bg-white p-4 shadow">
+        <div class="text-sm text-slate-500">Calories (kcal)</div>
+        <div id="statCalories" class="text-3xl font-semibold">0</div>
+      </div>
+      <div class="rounded-2xl bg-white p-4 shadow">
+        <div class="text-sm text-slate-500">Protein (g)</div>
+        <div id="statProtein" class="text-3xl font-semibold">0</div>
+      </div>
+      <div class="rounded-2xl bg-white p-4 shadow">
+        <div class="text-sm text-slate-500">Carbs (g)</div>
+        <div id="statCarbs" class="text-3xl font-semibold">0</div>
+      </div>
+      <div class="rounded-2xl bg-white p-4 shadow">
+        <div class="text-sm text-slate-500">Fat (g)</div>
+        <div id="statFat" class="text-3xl font-semibold">0</div>
+      </div>
+    </section>
+
+    <!-- Goal & Progress -->
+    <section class="rounded-2xl bg-white p-4 shadow mb-6">
+      <div class="flex items-end gap-4 flex-wrap">
+        <div class="grow">
+          <div class="flex items-center justify-between gap-4">
+            <h2 class="text-lg font-semibold">Daily Goal</h2>
+            <div class="flex items-center gap-2">
+              <label for="goalInput" class="text-sm text-slate-600">Goal (kcal)</label>
+              <input id="goalInput" type="number" min="500" step="50" class="px-3 py-2 rounded-xl border border-slate-300 bg-white shadow-sm w-32" />
+            </div>
+          </div>
+          <div class="mt-3">
+            <div class="h-3 w-full bg-slate-100 rounded-full overflow-hidden border border-slate-200">
+              <div id="goalBar" class="h-full w-0 rounded-full bg-emerald-600"></div>
+            </div>
+            <div class="mt-2 text-sm text-slate-600">
+              <span id="goalText">0 / 0 kcal</span>
+              ·
+              <span id="goalRemaining">0 kcal remaining</span>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- Scanner & Search -->
+    <section class="grid grid-cols-1 lg:grid-cols-5 gap-6 mb-6">
+      <div class="lg:col-span-3 rounded-2xl bg-white p-4 shadow">
+        <div class="flex items-center justify-between mb-3">
+          <h2 class="text-lg font-semibold">Barcode Scanner</h2>
+          <div class="flex items-center gap-2">
+            <select id="cameraSelect" class="px-3 py-2 rounded-xl border border-slate-300 bg-white shadow-sm"></select>
+            <button id="toggleScanBtn" class="px-3 py-2 rounded-xl border border-slate-300 bg-white hover:bg-slate-100">Start</button>
+          </div>
+        </div>
+        <div class="aspect-video rounded-xl overflow-hidden bg-slate-100 border border-slate-200 relative">
+          <video id="video" class="w-full h-full object-cover" playsinline muted></video>
+          <div class="absolute inset-0 pointer-events-none flex items-center justify-center">
+            <div class="w-48 h-48 rounded-2xl border-4 border-white/80 shadow-[0_0_0_200vmax_rgba(0,0,0,0.35)]"></div>
+          </div>
+        </div>
+        <p id="scanStatus" class="mt-2 text-sm text-slate-500">Scanner idle.</p>
+      </div>
+
+      <div class="lg:col-span-2 rounded-2xl bg-white p-4 shadow">
+        <h2 class="text-lg font-semibold mb-3">Find a Product</h2>
+        <div class="flex gap-2 mb-3">
+          <input id="manualBarcode" type="text" inputmode="numeric" placeholder="Enter barcode (EAN/UPC)" class="flex-1 px-3 py-2 rounded-xl border border-slate-300 bg-white shadow-sm" />
+          <button id="lookupBtn" class="px-4 py-2 rounded-2xl bg-slate-900 text-white">Lookup</button>
+        </div>
+        <div class="flex gap-2">
+          <input id="searchQuery" type="text" placeholder="Search by name (Open Food Facts)" class="flex-1 px-3 py-2 rounded-xl border border-slate-300 bg-white shadow-sm" />
+          <button id="searchBtn" class="px-4 py-2 rounded-2xl border border-slate-300 bg-white">Search</button>
+        </div>
+        <ul id="searchResults" class="mt-3 space-y-2"></ul>
+      </div>
+    </section>
+
+    <!-- Product Card -->
+    <section id="productSection" class="hidden rounded-2xl bg-white p-4 shadow mb-6">
+      <div class="flex flex-col md:flex-row gap-4">
+        <img id="productImage" class="w-32 h-32 object-cover rounded-xl border border-slate-200" alt="Product image" />
+        <div class="flex-1">
+          <h3 id="productName" class="text-xl font-semibold">—</h3>
+          <p id="productBrand" class="text-slate-600">—</p>
+          <p id="productBarcode" class="text-xs text-slate-500">—</p>
+          <div class="grid grid-cols-2 sm:grid-cols-4 gap-3 mt-3">
+            <div class="p-3 rounded-xl bg-slate-50 border border-slate-200"><div class="text-xs text-slate-500">kcal/100g</div><div id="kcal100" class="text-lg font-semibold">—</div></div>
+            <div class="p-3 rounded-xl bg-slate-50 border border-slate-200"><div class="text-xs text-slate-500">Protein/100g</div><div id="prot100" class="text-lg font-semibold">— g</div></div>
+            <div class="p-3 rounded-xl bg-slate-50 border border-slate-200"><div class="text-xs text-slate-500">Carbs/100g</div><div id="carb100" class="text-lg font-semibold">— g</div></div>
+            <div class="p-3 rounded-xl bg-slate-50 border border-slate-200"><div class="text-xs text-slate-500">Fat/100g</div><div id="fat100" class="text-lg font-semibold">— g</div></div>
+          </div>
+        </div>
+      </div>
+      <div class="mt-4 grid grid-cols-1 md:grid-cols-3 gap-3">
+        <div>
+          <label class="text-sm text-slate-600">Serving (g/ml)</label>
+          <input id="servingGrams" type="number" min="1" step="1" value="100" class="mt-1 w-full px-3 py-2 rounded-xl border border-slate-300 bg-white shadow-sm" />
+        </div>
+        <div>
+          <label class="text-sm text-slate-600">Quantity</label>
+          <input id="servingQty" type="number" min="1" step="1" value="1" class="mt-1 w-full px-3 py-2 rounded-xl border border-slate-300 bg-white shadow-sm" />
+        </div>
+        <div class="flex items-end gap-2">
+          <button id="addToLogBtn" class="w-full px-4 py-3 rounded-2xl bg-emerald-600 text-white font-medium shadow">Add to Log</button>
+        </div>
+      </div>
+    </section>
+
+    <!-- Daily Log -->
+    <section class="rounded-2xl bg-white p-4 shadow">
+      <div class="flex items-center justify-between mb-3">
+        <h2 class="text-lg font-semibold">Daily Log</h2>
+        <button id="clearDayBtn" class="px-3 py-2 rounded-xl border border-slate-300 bg-white hover:bg-slate-100">Clear Day</button>
+      </div>
+      <div class="overflow-x-auto">
+        <table class="min-w-full text-sm">
+          <thead>
+            <tr class="text-left text-slate-500 border-b">
+              <th class="py-2 pr-2">Item</th>
+              <th class="py-2 pr-2">Brand</th>
+              <th class="py-2 pr-2">Qty</th>
+              <th class="py-2 pr-2">g/ml</th>
+              <th class="py-2 pr-2">kcal</th>
+              <th class="py-2 pr-2">P (g)</th>
+              <th class="py-2 pr-2">C (g)</th>
+              <th class="py-2 pr-2">F (g)</th>
+              <th class="py-2">—</th>
+            </tr>
+          </thead>
+          <tbody id="logBody"></tbody>
+        </table>
+      </div>
+    </section>
+
+    <footer class="text-xs text-slate-500 mt-6">
+      <p>Note: Camera access requires HTTPS (e.g., Vercel/GitHub Pages) or http://localhost when testing locally.</p>
+    </footer>
+  </div>
+
+  <!-- ZXing for barcode scanning -->
+  <script src="https://unpkg.com/@zxing/library@latest"></script>
+  <script>
+    // --- Constants
+    const OFF_PRODUCT = (barcode) => `https://world.openfoodfacts.org/api/v2/product/${barcode}.json`;
+    const OFF_SEARCH = (q) => `https://world.openfoodfacts.org/api/v2/search?fields=code,product_name,brands,image_small_url&countries_tags_en=South%20Africa&locale=en&sort_by=unique_scans_n&page_size=10&general_search_term=${encodeURIComponent(q)}`;
+
+    // --- State
+    let selectedDate = new Date().toISOString().slice(0,10);
+    let currentProduct = null;
+    let codeReader = null;
+    let currentDeviceId = null;
+    let scanning = false;
+
+    // --- Elements
+    const datePicker = document.getElementById('datePicker');
+    const newDayBtn = document.getElementById('newDayBtn');
+    const statCalories = document.getElementById('statCalories');
+    const statProtein = document.getElementById('statProtein');
+    const statCarbs   = document.getElementById('statCarbs');
+    const statFat     = document.getElementById('statFat');
+
+    const cameraSelect = document.getElementById('cameraSelect');
+    const videoEl = document.getElementById('video');
+    const scanStatus = document.getElementById('scanStatus');
+    const toggleScanBtn = document.getElementById('toggleScanBtn');
+
+    const manualBarcode = document.getElementById('manualBarcode');
+    const lookupBtn = document.getElementById('lookupBtn');
+    const searchQuery = document.getElementById('searchQuery');
+    const searchBtn = document.getElementById('searchBtn');
+    const searchResults = document.getElementById('searchResults');
+
+    const productSection = document.getElementById('productSection');
+    const productImage = document.getElementById('productImage');
+    const productName = document.getElementById('productName');
+    const productBrand = document.getElementById('productBrand');
+    const productBarcode = document.getElementById('productBarcode');
+    const kcal100 = document.getElementById('kcal100');
+    const prot100 = document.getElementById('prot100');
+    const carb100 = document.getElementById('carb100');
+    const fat100 = document.getElementById('fat100');
+    const servingGrams = document.getElementById('servingGrams');
+    const servingQty = document.getElementById('servingQty');
+    const addToLogBtn = document.getElementById('addToLogBtn');
+
+    const logBody = document.getElementById('logBody');
+    const clearDayBtn = document.getElementById('clearDayBtn');
+
+    // Goal/progress elements
+    const goalInput = document.getElementById('goalInput');
+    const goalBar = document.getElementById('goalBar');
+    const goalText = document.getElementById('goalText');
+    const goalRemaining = document.getElementById('goalRemaining');
+
+    // --- Utilities
+    function isSecureOk(){
+      return location.protocol === 'https:' || location.hostname === 'localhost' || location.hostname === '127.0.0.1';
+    }
+    function getSavedCameraId(){ return localStorage.getItem('caltrack:camId') || null; }
+    function setSavedCameraId(id){ if(id) localStorage.setItem('caltrack:camId', id); }
+
+    function lsKey(dateStr) { return `caltrack:${dateStr}`; }
+    function getDayLog(dateStr) { const raw = localStorage.getItem(lsKey(dateStr)); return raw ? JSON.parse(raw) : []; }
+    function setDayLog(dateStr, arr) { localStorage.setItem(lsKey(dateStr), JSON.stringify(arr)); }
+    function sumMacros(items) {
+      const s = items.reduce((acc, it) => { acc.kcal += it.kcal; acc.prot += it.protein; acc.carb += it.carbs; acc.fat += it.fat; return acc; }, {kcal:0, prot:0, carb:0, fat:0});
+      return s;
+    }
+    function round1(n){ return Math.round(n * 10) / 10; }
+    function showToast(msg){ const t = document.createElement('div'); t.className = 'fixed bottom-4 left-1/2 -translate-x-1/2 bg-slate-900 text-white px-4 py-2 rounded-2xl shadow'; t.textContent = msg; document.body.appendChild(t); setTimeout(()=> t.remove(), 2200); }
+
+    // --- Goal helpers
+    function getGoal(){ const v = Number(localStorage.getItem('caltrack:goal')); return Number.isFinite(v) && v > 0 ? v : 2500; }
+    function setGoal(v){ if(!Number.isFinite(v) || v <= 0) return; localStorage.setItem('caltrack:goal', String(Math.round(v))); }
+    function updateProgress(){
+      if(!goalBar) return;
+      const goal = getGoal();
+      const consumed = Number(statCalories.textContent) || 0;
+      const pct = goal ? Math.max(0, Math.min(100, (consumed/goal)*100)) : 0;
+      goalBar.style.width = pct + '%';
+      goalText.textContent = `${Math.round(consumed)} / ${Math.round(goal)} kcal`;
+      const diff = Math.round(goal - consumed);
+      goalRemaining.textContent = diff >= 0 ? `${diff} kcal remaining` : `${Math.abs(diff)} kcal over`;
+      goalBar.className = 'h-full rounded-full ' + (diff >= 0 ? 'bg-emerald-600' : 'bg-red-500');
+    }
+
+    // --- UI: Date handling
+    function setDate(dateStr){ selectedDate = dateStr; datePicker.value = dateStr; renderLog(); }
+
+    // --- Renderers
+    function renderLog(){
+      const items = getDayLog(selectedDate);
+      logBody.innerHTML = '';
+      items.forEach((it, idx) => {
+        const tr = document.createElement('tr');
+        tr.className = 'border-b last:border-0';
+        tr.innerHTML = `
+          <td class="py-2 pr-2">${it.name}</td>
+          <td class="py-2 pr-2">${it.brand || '—'}</td>
+          <td class="py-2 pr-2">${it.qty}</td>
+          <td class="py-2 pr-2">${it.grams}</td>
+          <td class="py-2 pr-2">${Math.round(it.kcal)}</td>
+          <td class="py-2 pr-2">${round1(it.protein)}</td>
+          <td class="py-2 pr-2">${round1(it.carbs)}</td>
+          <td class="py-2 pr-2">${round1(it.fat)}</td>
+          <td class="py-2"><button data-idx="${idx}" class="delBtn px-2 py-1 rounded-lg bg-red-50 text-red-700 border border-red-200">Remove</button></td>`;
+        logBody.appendChild(tr);
+      });
+      const s = sumMacros(items);
+      statCalories.textContent = Math.round(s.kcal);
+      statProtein.textContent = round1(s.prot);
+      statCarbs.textContent   = round1(s.carb);
+      statFat.textContent     = round1(s.fat);
+      updateProgress();
+      document.querySelectorAll('.delBtn').forEach(btn => {
+        btn.addEventListener('click', (e)=>{ const i = Number(e.currentTarget.getAttribute('data-idx')); const cur = getDayLog(selectedDate); cur.splice(i,1); setDayLog(selectedDate, cur); renderLog(); });
+      });
+    }
+
+    function showProduct(p){
+      currentProdu
