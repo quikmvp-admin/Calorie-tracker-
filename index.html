@@ -175,13 +175,18 @@
     const setStatus = (m)=>{ $('status').textContent = 'Status: ' + m; console.log('[CalTrack]', m); };
     const OFF_PRODUCT = (code)=>`https://world.openfoodfacts.org/api/v2/product/${code}.json`;
     // Global search (no country filter), supports pagination & nocache
-    // Replace your OFF_SEARCH with this (v1 simple search)
+ // Countries filter: SA, UK, US (OR with `|` per OFF v2 docs)
+const COUNTRIES_OR = 'en:south-africa|en:united-kingdom|en:united-states';
+
+// Relevance-ranked search (paged) with country filter
 const OFF_SEARCH = (q, page=1, pageSize=24) =>
-  `https://world.openfoodfacts.org/cgi/search.pl?` +
-  `search_terms=${encodeURIComponent(q)}&search_simple=1&` +   // full-text name search
-  `action=process&json=1&` +                                   // JSON response
-  `page_size=${pageSize}&page=${page}&` +                      // pagination
-  `sort_by=product_name&nocache=1`;                            // stable ordering + avoid cached 1st page
+  `https://world.openfoodfacts.org/api/v2/search?` +
+  `fields=code,product_name,brands,image_small_url&` +
+  `search_terms=${encodeURIComponent(q)}&` +                   // free-text
+  `countries_tags=${encodeURIComponent(COUNTRIES_OR)}&` +     // SA OR UK OR US
+  `page_size=${pageSize}&page=${page}&` +                     // pagination
+  `sort_by=relevance&locale=en&nocache=1`;                    // most relevant first
+
     const secureOK = ()=> location.protocol==='https:' || location.hostname==='localhost' || location.hostname==='127.0.0.1';
     const round1 = n => Math.round(n*10)/10;
 
