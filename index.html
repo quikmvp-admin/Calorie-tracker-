@@ -4,8 +4,10 @@
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
 <title>CalTrack — Barcode Calorie Tracker</title>
+<meta name="description" content="Track calories with barcode scanning and Open Food Facts search. Single-file web app." />
 <script src="https://cdn.tailwindcss.com"></script>
 <style>
+  /* Hide number spinners in some browsers */
   input[type=number]::-webkit-inner-spin-button,
   input[type=number]::-webkit-outer-spin-button { -webkit-appearance: none; margin: 0; }
   input[type=number] { -moz-appearance: textfield; }
@@ -17,7 +19,7 @@
     <header class="flex flex-col md:flex-row items-start md:items-center justify-between gap-3">
       <div>
         <h1 class="text-3xl font-bold">CalTrack</h1>
-        <p class="text-slate-600">Search or scan a barcode → set serving → <strong>Add to Log</strong>. Camera needs HTTPS or localhost.</p>
+        <p class="text-slate-600">Search or scan → set serving → <strong>Add to Log</strong>. Camera needs HTTPS or localhost.</p>
         <p id="status" class="mt-1 text-sm text-slate-500">Status: ready</p>
       </div>
       <div class="flex items-center gap-3">
@@ -99,6 +101,7 @@
           <button id="btnSearch" class="px-4 py-2 rounded-2xl border border-slate-300 bg-white">Search</button>
         </div>
         <ul id="results" class="mt-3 space-y-2"></ul>
+        <!-- Load more button will be appended here -->
       </div>
     </section>
 
@@ -171,7 +174,12 @@
     const $ = (id)=>document.getElementById(id);
     const setStatus = (m)=>{ $('status').textContent = 'Status: ' + m; console.log('[CalTrack]', m); };
     const OFF_PRODUCT = (code)=>`https://world.openfoodfacts.org/api/v2/product/${code}.json`;
-    const OFF_SEARCH  = (q)=>`https://world.openfoodfacts.org/api/v2/search?fields=code,product_name,brands,image_small_url&countries_tags_en=South%20Africa&locale=en&page_size=12&general_search_term=${encodeURIComponent(q)}`;
+    // Global search (no country filter), supports pagination & nocache
+    const OFF_SEARCH = (q, page=1, pageSize=24) =>
+      `https://world.openfoodfacts.org/api/v2/search?` +
+      `fields=code,product_name,brands,image_small_url&` +
+      `page_size=${pageSize}&page=${page}&search_terms=${encodeURIComponent(q)}&` +
+      `sort_by=unique_scans_n&locale=en&nocache=1`;
     const secureOK = ()=> location.protocol==='https:' || location.hostname==='localhost' || location.hostname==='127.0.0.1';
     const round1 = n => Math.round(n*10)/10;
 
@@ -180,6 +188,7 @@
     let goal = 2500;
     let currentProduct = null;
     let codeReader = null, currentDeviceId = null, scanning = false;
+    let searchState = { q:'', page:1, pageSize:24, loading:false, done:false };
 
     // ---------- storage ----------
     const dayKey = (d)=>`caltrack:${d}`;
@@ -205,11 +214,12 @@
       const prod = data?.product || {};
       const n = prod.nutriments || {};
       const num = (k)=> (typeof n[k]==='number' ? n[k] : (n[k]? Number(n[k]) : undefined));
+      // kcal fallback from kJ
       const kcal = num('energy-kcal_100g') ?? num('energy-kcal_value') ?? ((num('energy_100g') ?? 0)/4.184);
       return {
         code: prod.code,
         name: prod.product_name || prod.generic_name || 'Unknown',
-        brand: prod.brands || '',
+        brand: (prod.brands || '').split(',').map(s=>s.trim()).filter(Boolean).join(', '),
         image: prod.image_front_small_url || prod.image_small_url || prod.image_url,
         kcal100: kcal ?? undefined,
         prot100: num('proteins_100g'),
@@ -233,7 +243,7 @@
       $('goalText').textContent = `${Math.round(s.kcal)} / ${Math.round(goal)} kcal`;
       const diff = Math.round(goal - s.kcal);
       $('goalRemaining').textContent = diff >= 0 ? `${diff} kcal remaining` : `${Math.abs(diff)} kcal over`;
-      $('goalBar').className = 'h-full w-['+pct+'%] rounded-full ' + (diff>=0 ? 'bg-emerald-600':'bg-red-500');
+      $('goalBar').className = 'h-full rounded-full ' + (diff>=0 ? 'bg-emerald-600':'bg-red-500');
     }
     function renderLogTable(){
       const tbody = $('logBody'); tbody.innerHTML = '';
@@ -275,16 +285,72 @@
       setStatus('Found: ' + p.name);
       return p;
     }
-    async function searchOFF(q){
-      const r = await fetch(OFF_SEARCH(q));
-      if(!r.ok) throw new Error('HTTP ' + r.status);
-      const j = await r.json();
-      return (j.products || []).map(p => ({
-        code: p.code,
-        name: p.product_name || 'Unknown',
-        brand: p.brands || '',
-        image: p.image_small_url
-      }));
+
+    // ---------- Search (paged) ----------
+    async function loadMoreResults(reset=false){
+      if(searchState.loading || searchState.done) return;
+      searchState.loading = true;
+      const ul = $('results');
+      if(reset) ul.innerHTML = '';
+      try{
+        const url = OFF_SEARCH(searchState.q, searchState.page, searchState.pageSize);
+        const r = await fetch(url);
+        if(!r.ok) throw new Error('HTTP ' + r.status);
+        const j = await r.json();
+        const products = j.products || [];
+
+        if(products.length === 0){
+          if(reset) ul.innerHTML = '<li class="text-sm text-slate-500">No results.</li>';
+          searchState.done = true;
+          setStatus('No more results');
+          const more = $('loadMore'); if(more){ more.disabled = true; more.textContent = 'End of results'; }
+          return;
+        }
+
+        for(const p of products){
+          const li = document.createElement('li');
+          li.className = 'p-2 border rounded-xl hover:bg-slate-50 cursor-pointer';
+          li.innerHTML = `
+            <div class="flex items-center gap-3">
+              <img src="${p.image_small_url || 'https://static.openfoodfacts.org/images/icons/dist/packaging.svg'}"
+                   class="w-10 h-10 rounded border" alt="">
+              <div class="flex-1">
+                <div class="font-medium">${p.product_name || 'Unknown'}</div>
+                <div class="text-xs text-slate-500">${(p.brands || '').split(',').map(s=>s.trim()).filter(Boolean).join(', ')} · ${p.code}</div>
+              </div>
+            </div>`;
+          li.addEventListener('click', ()=> {
+            // Load full product immediately for logging:
+            fetchByBarcode(p.code).catch(e=> setStatus('Lookup failed: ' + e.message));
+          });
+          ul.appendChild(li);
+        }
+
+        let more = $('loadMore');
+        if(!more){
+          more = document.createElement('button');
+          more.id = 'loadMore';
+          more.className = 'mt-2 w-full px-3 py-2 rounded-xl border border-slate-300 bg-white';
+          more.textContent = 'Load more';
+          more.addEventListener('click', ()=> {
+            searchState.page += 1;
+            loadMoreResults(false);
+          });
+          ul.parentElement.appendChild(more);
+        }
+        if(products.length < searchState.pageSize){
+          searchState.done = true;
+          more.disabled = true; more.textContent = 'End of results';
+        }else{
+          more.disabled = false; more.textContent = 'Load more';
+        }
+
+        setStatus(`Showing page ${searchState.page} for "${searchState.q}"`);
+      }catch(e){
+        setStatus('Search failed: ' + e.message);
+      }finally{
+        searchState.loading = false;
+      }
     }
 
     // ---------- add to log ----------
@@ -365,7 +431,6 @@
             setStatus('Scanned: ' + code);
             stopScanner();
             $('barcode').value = code;
-            // auto load product after a scan:
             fetchByBarcode(code).catch(e=> setStatus('Lookup failed: ' + e.message));
           }
           if(err && !(err instanceof ZXing.NotFoundException)) console.warn(err);
@@ -388,49 +453,32 @@
     }
 
     // ---------- events ----------
+    // Search
     $('btnSearch').addEventListener('click', async ()=>{
       const q = $('q').value.trim();
       if(!q){ setStatus('Enter a search term'); return; }
-      const ul = $('results'); ul.innerHTML = '<li class="text-sm text-slate-500">Searching…</li>';
-      try{
-        const arr = await searchOFF(q);
-        if(arr.length===0){ ul.innerHTML = '<li class="text-sm text-slate-500">No results.</li>'; setStatus('0 results'); return; }
-        ul.innerHTML = '';
-        arr.forEach(p=>{
-          const li = document.createElement('li');
-          li.className = 'p-2 border rounded-xl hover:bg-slate-50 cursor-pointer';
-          li.innerHTML = `
-            <div class="flex items-center gap-3">
-              <img src="${p.image || 'https://static.openfoodfacts.org/images/icons/dist/packaging.svg'}" class="w-10 h-10 rounded border" alt="">
-              <div class="flex-1">
-                <div class="font-medium">${p.name}</div>
-                <div class="text-xs text-slate-500">${p.brand || ''} · ${p.code}</div>
-              </div>
-            </div>`;
-          li.addEventListener('click', ()=> {
-            // Load full product immediately for logging:
-            fetchByBarcode(p.code).catch(e=> setStatus('Lookup failed: ' + e.message));
-          });
-          ul.appendChild(li);
-        });
-        setStatus('Found ' + arr.length + ' result(s)');
-      }catch(e){
-        ul.innerHTML = `<li class="text-sm text-red-600">${e.message}</li>`;
-        setStatus('Search failed: ' + e.message);
-      }
+      // reset state for new query
+      searchState = { q, page:1, pageSize:24, loading:false, done:false };
+      $('results').innerHTML = '<li class="text-sm text-slate-500">Searching…</li>';
+      const more = $('loadMore'); if(more) more.remove(); // remove old button
+      await loadMoreResults(true);
     });
+    $('q').addEventListener('keydown', (e)=>{ if(e.key==='Enter') $('btnSearch').click(); });
 
+    // Manual lookup
     $('btnLookup').addEventListener('click', ()=>{
       const code = $('barcode').value.trim();
       if(!code){ setStatus('Enter a barcode first'); return; }
       fetchByBarcode(code).catch(e=> setStatus('Lookup failed: ' + e.message));
     });
 
+    // Log actions
     $('btnAdd').addEventListener('click', addCurrentToLog);
     $('btnClear').addEventListener('click', ()=>{
       if(confirm('Clear all entries for this day?')){ setLog(selectedDate, []); renderLogTable(); }
     });
 
+    // Goal
     $('goalInput').addEventListener('change', ()=>{
       const v = Number($('goalInput').value);
       if(Number.isFinite(v) && v>0){ goal = Math.round(v); setGoalLS(goal); renderTotals(); }
@@ -440,6 +488,7 @@
       if(Number.isFinite(v) && v>0){ goal = v; renderTotals(); }
     });
 
+    // Date
     $('datePicker').addEventListener('change', (e)=>{
       selectedDate = e.target.value; renderLogTable();
     });
@@ -448,6 +497,7 @@
       $('datePicker').value = selectedDate; renderLogTable();
     });
 
+    // Camera controls
     $('cameraSelect').addEventListener('change', (e)=>{
       currentDeviceId = e.target.value; if(scanning){ stopScanner(); startScanner(); }
     });
@@ -455,7 +505,6 @@
 
     // ---------- init ----------
     (async function init(){
-      // date + goal
       $('datePicker').value = selectedDate;
       goal = getGoalLS();
       $('goalInput').value = goal;
