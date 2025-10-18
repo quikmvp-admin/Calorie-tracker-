@@ -3,223 +3,471 @@
 <head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
-<title>CalTrack — Minimal Test</title>
+<title>CalTrack — Barcode Calorie Tracker</title>
 <script src="https://cdn.tailwindcss.com"></script>
+<style>
+  input[type=number]::-webkit-inner-spin-button,
+  input[type=number]::-webkit-outer-spin-button { -webkit-appearance: none; margin: 0; }
+  input[type=number] { -moz-appearance: textfield; }
+</style>
 </head>
 <body class="min-h-screen bg-slate-50 text-slate-900">
-  <div class="max-w-3xl mx-auto p-4 md:p-8 space-y-6">
-    <header>
-      <h1 class="text-2xl font-bold">CalTrack (Minimal)</h1>
-      <p class="text-slate-600">Manual lookup + search always work. Scanner works on HTTPS/localhost only.</p>
-      <p id="status" class="mt-2 text-sm text-slate-500">Status: app loaded</p>
+  <div class="max-w-5xl mx-auto p-4 md:p-8 space-y-6">
+    <!-- Header -->
+    <header class="flex flex-col md:flex-row items-start md:items-center justify-between gap-3">
+      <div>
+        <h1 class="text-3xl font-bold">CalTrack</h1>
+        <p class="text-slate-600">Search or scan a barcode → set serving → <strong>Add to Log</strong>. Camera needs HTTPS or localhost.</p>
+        <p id="status" class="mt-1 text-sm text-slate-500">Status: ready</p>
+      </div>
+      <div class="flex items-center gap-3">
+        <label class="text-sm text-slate-600 hidden sm:block">Date</label>
+        <input id="datePicker" type="date" class="px-3 py-2 rounded-xl border border-slate-300 bg-white shadow-sm" />
+        <button id="todayBtn" class="px-4 py-2 rounded-2xl bg-slate-900 text-white">Today</button>
+      </div>
     </header>
 
-    <!-- Manual lookup -->
-    <section class="rounded-2xl bg-white p-4 shadow space-y-3">
-      <h2 class="font-semibold">Manual Lookup by Barcode</h2>
-      <div class="flex gap-2">
-        <input id="barcode" class="flex-1 px-3 py-2 rounded-xl border border-slate-300" placeholder="e.g. 737628064502" />
-        <button id="btnLookup" class="px-4 py-2 rounded-2xl bg-slate-900 text-white">Lookup</button>
+    <!-- Stats -->
+    <section class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+      <div class="rounded-2xl bg-white p-4 shadow">
+        <div class="text-sm text-slate-500">Calories (kcal)</div>
+        <div id="statKcal" class="text-3xl font-semibold">0</div>
       </div>
-      <div id="product" class="text-sm"></div>
+      <div class="rounded-2xl bg-white p-4 shadow">
+        <div class="text-sm text-slate-500">Protein (g)</div>
+        <div id="statProt" class="text-3xl font-semibold">0</div>
+      </div>
+      <div class="rounded-2xl bg-white p-4 shadow">
+        <div class="text-sm text-slate-500">Carbs (g)</div>
+        <div id="statCarb" class="text-3xl font-semibold">0</div>
+      </div>
+      <div class="rounded-2xl bg-white p-4 shadow">
+        <div class="text-sm text-slate-500">Fat (g)</div>
+        <div id="statFat" class="text-3xl font-semibold">0</div>
+      </div>
     </section>
 
-    <!-- Search -->
-    <section class="rounded-2xl bg-white p-4 shadow space-y-3">
-      <h2 class="font-semibold">Search (Open Food Facts)</h2>
-      <div class="flex gap-2">
-        <input id="q" class="flex-1 px-3 py-2 rounded-xl border border-slate-300" placeholder="e.g. milk" />
-        <button id="btnSearch" class="px-4 py-2 rounded-2xl border border-slate-300 bg-white">Search</button>
-      </div>
-      <ul id="results" class="space-y-2"></ul>
-    </section>
-
-    <!-- Scanner (optional) -->
-    <section class="rounded-2xl bg-white p-4 shadow space-y-3">
-      <div class="flex items-center justify-between">
-        <h2 class="font-semibold">Barcode Scanner (optional)</h2>
-        <div class="flex gap-2">
-          <select id="cameraSelect" class="px-3 py-2 rounded-xl border border-slate-300"></select>
-          <button id="btnScan" class="px-3 py-2 rounded-xl border border-slate-300">Start</button>
+    <!-- Goal -->
+    <section class="rounded-2xl bg-white p-4 shadow">
+      <div class="flex items-end gap-4 flex-wrap">
+        <div class="grow">
+          <div class="flex items-center justify-between gap-4">
+            <h2 class="text-lg font-semibold">Daily Goal</h2>
+            <div class="flex items-center gap-2">
+              <label for="goalInput" class="text-sm text-slate-600">Goal (kcal)</label>
+              <input id="goalInput" type="number" min="500" step="50" class="px-3 py-2 rounded-xl border border-slate-300 bg-white shadow-sm w-28" />
+            </div>
+          </div>
+          <div class="mt-3">
+            <div class="h-3 w-full bg-slate-100 rounded-full overflow-hidden border border-slate-200">
+              <div id="goalBar" class="h-full w-0 rounded-full bg-emerald-600"></div>
+            </div>
+            <div class="mt-2 text-sm text-slate-600">
+              <span id="goalText">0 / 0 kcal</span> · <span id="goalRemaining">0 kcal remaining</span>
+            </div>
+          </div>
         </div>
       </div>
-      <div class="aspect-video rounded-xl overflow-hidden bg-slate-100 border border-slate-200 relative">
-        <video id="video" class="w-full h-full object-cover" playsinline muted></video>
+    </section>
+
+    <!-- Scanner + Search -->
+    <section class="grid grid-cols-1 lg:grid-cols-5 gap-6">
+      <!-- Scanner -->
+      <div class="lg:col-span-3 rounded-2xl bg-white p-4 shadow">
+        <div class="flex items-center justify-between mb-3">
+          <h2 class="text-lg font-semibold">Barcode Scanner</h2>
+          <div class="flex items-center gap-2">
+            <select id="cameraSelect" class="px-3 py-2 rounded-xl border border-slate-300 bg-white shadow-sm"></select>
+            <button id="btnScan" class="px-3 py-2 rounded-xl border border-slate-300">Start</button>
+          </div>
+        </div>
+        <div class="aspect-video rounded-xl overflow-hidden bg-slate-100 border border-slate-200 relative">
+          <video id="video" class="w-full h-full object-cover" playsinline muted></video>
+        </div>
+        <p id="scanStatus" class="mt-2 text-sm text-slate-500">Scanner idle.</p>
       </div>
-      <p id="scanStatus" class="text-sm text-slate-500">Scanner idle.</p>
+
+      <!-- Search / Manual -->
+      <div class="lg:col-span-2 rounded-2xl bg-white p-4 shadow">
+        <h2 class="text-lg font-semibold mb-3">Find a Product</h2>
+        <div class="flex gap-2 mb-3">
+          <input id="barcode" type="text" inputmode="numeric" placeholder="Enter barcode (EAN/UPC)" class="flex-1 px-3 py-2 rounded-xl border border-slate-300 bg-white shadow-sm" />
+          <button id="btnLookup" class="px-4 py-2 rounded-2xl bg-slate-900 text-white">Lookup</button>
+        </div>
+        <div class="flex gap-2">
+          <input id="q" type="text" placeholder="Search by name (Open Food Facts)" class="flex-1 px-3 py-2 rounded-xl border border-slate-300 bg-white shadow-sm" />
+          <button id="btnSearch" class="px-4 py-2 rounded-2xl border border-slate-300 bg-white">Search</button>
+        </div>
+        <ul id="results" class="mt-3 space-y-2"></ul>
+      </div>
+    </section>
+
+    <!-- Product card -->
+    <section id="productCard" class="hidden rounded-2xl bg-white p-4 shadow">
+      <div class="flex flex-col md:flex-row gap-4">
+        <img id="prodImg" class="w-32 h-32 object-cover rounded-xl border border-slate-200" alt="Product image" />
+        <div class="flex-1">
+          <h3 id="prodName" class="text-xl font-semibold">—</h3>
+          <p id="prodBrand" class="text-slate-600">—</p>
+          <p id="prodCode" class="text-xs text-slate-500">—</p>
+          <div class="grid grid-cols-2 sm:grid-cols-4 gap-3 mt-3">
+            <div class="p-3 rounded-xl bg-slate-50 border border-slate-200"><div class="text-xs text-slate-500">kcal/100g</div><div id="kcal100" class="text-lg font-semibold">—</div></div>
+            <div class="p-3 rounded-xl bg-slate-50 border border-slate-200"><div class="text-xs text-slate-500">Protein/100g</div><div id="prot100" class="text-lg font-semibold">— g</div></div>
+            <div class="p-3 rounded-xl bg-slate-50 border border-slate-200"><div class="text-xs text-slate-500">Carbs/100g</div><div id="carb100" class="text-lg font-semibold">— g</div></div>
+            <div class="p-3 rounded-xl bg-slate-50 border border-slate-200"><div class="text-xs text-slate-500">Fat/100g</div><div id="fat100" class="text-lg font-semibold">— g</div></div>
+          </div>
+        </div>
+      </div>
+      <div class="mt-4 grid grid-cols-1 md:grid-cols-3 gap-3">
+        <div>
+          <label class="text-sm text-slate-600">Serving (g/ml)</label>
+          <input id="servGrams" type="number" min="1" step="1" value="100" class="mt-1 w-full px-3 py-2 rounded-xl border border-slate-300 bg-white shadow-sm" />
+        </div>
+        <div>
+          <label class="text-sm text-slate-600">Quantity</label>
+          <input id="servQty" type="number" min="1" step="1" value="1" class="mt-1 w-full px-3 py-2 rounded-xl border border-slate-300 bg-white shadow-sm" />
+        </div>
+        <div class="flex items-end">
+          <button id="btnAdd" class="w-full px-4 py-3 rounded-2xl bg-emerald-600 text-white font-medium shadow">Add to Log</button>
+        </div>
+      </div>
+    </section>
+
+    <!-- Daily log -->
+    <section class="rounded-2xl bg-white p-4 shadow">
+      <div class="flex items-center justify-between mb-3">
+        <h2 class="text-lg font-semibold">Daily Log</h2>
+        <button id="btnClear" class="px-3 py-2 rounded-xl border border-slate-300 bg-white hover:bg-slate-100">Clear Day</button>
+      </div>
+      <div class="overflow-x-auto">
+        <table class="min-w-full text-sm">
+          <thead>
+            <tr class="text-left text-slate-500 border-b">
+              <th class="py-2 pr-2">Item</th>
+              <th class="py-2 pr-2">Brand</th>
+              <th class="py-2 pr-2">Qty</th>
+              <th class="py-2 pr-2">g/ml</th>
+              <th class="py-2 pr-2">kcal</th>
+              <th class="py-2 pr-2">P (g)</th>
+              <th class="py-2 pr-2">C (g)</th>
+              <th class="py-2 pr-2">F (g)</th>
+              <th class="py-2">—</th>
+            </tr>
+          </thead>
+          <tbody id="logBody"></tbody>
+        </table>
+      </div>
     </section>
 
     <footer class="text-xs text-slate-500">
-      Camera requires HTTPS (Vercel/GitHub Pages) or http://localhost. Open DevTools → Console for logs.
+      Camera requires HTTPS (Vercel/GitHub Pages) or http://localhost. Open DevTools → Console for logs if anything fails.
     </footer>
   </div>
 
-  <!-- ZXing (best-effort; app still works if this fails) -->
+  <!-- ZXing (scanner) -->
   <script src="https://unpkg.com/@zxing/library@latest"></script>
   <script>
-  const $ = (id)=>document.getElementById(id);
-  const log = (...a)=>{ console.log('[CalTrack]', ...a); };
+    // ---------- helpers ----------
+    const $ = (id)=>document.getElementById(id);
+    const setStatus = (m)=>{ $('status').textContent = 'Status: ' + m; console.log('[CalTrack]', m); };
+    const OFF_PRODUCT = (code)=>`https://world.openfoodfacts.org/api/v2/product/${code}.json`;
+    const OFF_SEARCH  = (q)=>`https://world.openfoodfacts.org/api/v2/search?fields=code,product_name,brands,image_small_url&countries_tags_en=South%20Africa&locale=en&page_size=12&general_search_term=${encodeURIComponent(q)}`;
+    const secureOK = ()=> location.protocol==='https:' || location.hostname==='localhost' || location.hostname==='127.0.0.1';
+    const round1 = n => Math.round(n*10)/10;
 
-  const OFF_PRODUCT = (code)=>`https://world.openfoodfacts.org/api/v2/product/${code}.json`;
-  const OFF_SEARCH  = (q)=>`https://world.openfoodfacts.org/api/v2/search?fields=code,product_name,brands,image_small_url&countries_tags_en=South%20Africa&locale=en&page_size=10&general_search_term=${encodeURIComponent(q)}`;
+    // ---------- state ----------
+    let selectedDate = new Date().toISOString().slice(0,10);
+    let goal = 2500;
+    let currentProduct = null;
+    let codeReader = null, currentDeviceId = null, scanning = false;
 
-  const statusEl = $('status');
-  function setStatus(msg){ statusEl.textContent = 'Status: ' + msg; log(msg); }
+    // ---------- storage ----------
+    const dayKey = (d)=>`caltrack:${d}`;
+    const getLog = (d)=>{ const raw = localStorage.getItem(dayKey(d)); return raw? JSON.parse(raw): []; };
+    const setLog = (d,arr)=> localStorage.setItem(dayKey(d), JSON.stringify(arr));
+    const getGoalLS = ()=>{ const v = Number(localStorage.getItem('caltrack:goal')); return Number.isFinite(v)&&v>0? v: 2500; };
+    const setGoalLS = (v)=> localStorage.setItem('caltrack:goal', String(Math.round(v)));
 
-  // ---- Manual lookup
-  $('btnLookup').addEventListener('click', async ()=>{
-    const code = $('barcode').value.trim();
-    if(!code){ setStatus('Enter a barcode first'); return; }
-    setStatus('Looking up ' + code + ' …');
-    try{
+    // ---------- UI: product card ----------
+    function showProduct(p){
+      currentProduct = p;
+      $('productCard').classList.remove('hidden');
+      $('prodImg').src = p.image || 'https://static.openfoodfacts.org/images/icons/dist/packaging.svg';
+      $('prodName').textContent = p.name || 'Unknown product';
+      $('prodBrand').textContent = p.brand || '';
+      $('prodCode').textContent = 'Barcode: ' + (p.code || '—');
+      $('kcal100').textContent = p.kcal100!=null ? Math.round(p.kcal100) : '—';
+      $('prot100').textContent = p.prot100!=null ? `${round1(p.prot100)} g` : '— g';
+      $('carb100').textContent = p.carb100!=null ? `${round1(p.carb100)} g` : '— g';
+      $('fat100').textContent  = p.fat100 !=null ? `${round1(p.fat100)} g`  : '— g';
+    }
+    function productFromOFF(data){
+      const prod = data?.product || {};
+      const n = prod.nutriments || {};
+      const num = (k)=> (typeof n[k]==='number' ? n[k] : (n[k]? Number(n[k]) : undefined));
+      const kcal = num('energy-kcal_100g') ?? num('energy-kcal_value') ?? ((num('energy_100g') ?? 0)/4.184);
+      return {
+        code: prod.code,
+        name: prod.product_name || prod.generic_name || 'Unknown',
+        brand: prod.brands || '',
+        image: prod.image_front_small_url || prod.image_small_url || prod.image_url,
+        kcal100: kcal ?? undefined,
+        prot100: num('proteins_100g'),
+        carb100: num('carbohydrates_100g'),
+        fat100:  num('fat_100g'),
+      };
+    }
+
+    // ---------- totals / goal ----------
+    function renderTotals(){
+      const items = getLog(selectedDate);
+      const s = items.reduce((a,it)=>{ a.kcal+=it.kcal; a.prot+=it.protein; a.carb+=it.carbs; a.fat+=it.fat; return a; },
+        {kcal:0,prot:0,carb:0,fat:0});
+      $('statKcal').textContent = Math.round(s.kcal);
+      $('statProt').textContent = round1(s.prot);
+      $('statCarb').textContent = round1(s.carb);
+      $('statFat').textContent  = round1(s.fat);
+
+      const pct = goal ? Math.max(0, Math.min(100, (s.kcal/goal)*100)) : 0;
+      $('goalBar').style.width = pct + '%';
+      $('goalText').textContent = `${Math.round(s.kcal)} / ${Math.round(goal)} kcal`;
+      const diff = Math.round(goal - s.kcal);
+      $('goalRemaining').textContent = diff >= 0 ? `${diff} kcal remaining` : `${Math.abs(diff)} kcal over`;
+      $('goalBar').className = 'h-full w-['+pct+'%] rounded-full ' + (diff>=0 ? 'bg-emerald-600':'bg-red-500');
+    }
+    function renderLogTable(){
+      const tbody = $('logBody'); tbody.innerHTML = '';
+      const items = getLog(selectedDate);
+      items.forEach((it, idx)=>{
+        const tr = document.createElement('tr');
+        tr.className = 'border-b last:border-0';
+        tr.innerHTML = `
+          <td class="py-2 pr-2">${it.name}</td>
+          <td class="py-2 pr-2">${it.brand || '—'}</td>
+          <td class="py-2 pr-2">${it.qty}</td>
+          <td class="py-2 pr-2">${it.grams}</td>
+          <td class="py-2 pr-2">${Math.round(it.kcal)}</td>
+          <td class="py-2 pr-2">${round1(it.protein)}</td>
+          <td class="py-2 pr-2">${round1(it.carbs)}</td>
+          <td class="py-2 pr-2">${round1(it.fat)}</td>
+          <td class="py-2"><button data-idx="${idx}" class="del px-2 py-1 rounded-lg bg-red-50 text-red-700 border border-red-200">Remove</button></td>`;
+        tbody.appendChild(tr);
+      });
+      tbody.querySelectorAll('.del').forEach(btn=>{
+        btn.addEventListener('click', (e)=>{
+          const i = Number(e.currentTarget.getAttribute('data-idx'));
+          const cur = getLog(selectedDate); cur.splice(i,1); setLog(selectedDate, cur);
+          renderLogTable(); renderTotals();
+        });
+      });
+      renderTotals();
+    }
+
+    // ---------- API ----------
+    async function fetchByBarcode(code){
+      setStatus('Looking up ' + code + ' …');
       const r = await fetch(OFF_PRODUCT(code));
       if(!r.ok) throw new Error('HTTP ' + r.status);
       const j = await r.json();
       if(j.status !== 1) throw new Error('Product not found');
-      const p = j.product;
-      $('product').innerHTML = `
-        <div class="p-3 border rounded-xl">
-          <div class="font-medium">${p.product_name || 'Unknown'}</div>
-          <div class="text-xs text-slate-500">${p.brands || ''} · ${p.code}</div>
-        </div>`;
-      setStatus('Found: ' + (p.product_name || 'Unknown'));
-    }catch(e){
-      setStatus('Lookup failed: ' + e.message);
-      $('product').textContent = e.message;
+      const p = productFromOFF(j);
+      showProduct(p);
+      setStatus('Found: ' + p.name);
+      return p;
     }
-  });
-
-  // ---- Search
-  $('btnSearch').addEventListener('click', async ()=>{
-    const q = $('q').value.trim();
-    if(!q){ setStatus('Enter a search term'); return; }
-    setStatus('Searching "' + q + '" …');
-    const ul = $('results'); ul.innerHTML = '<li class="text-sm text-slate-500">Searching…</li>';
-    try{
+    async function searchOFF(q){
       const r = await fetch(OFF_SEARCH(q));
       if(!r.ok) throw new Error('HTTP ' + r.status);
       const j = await r.json();
-      const arr = (j.products || []);
-      if(arr.length === 0){ ul.innerHTML = '<li class="text-sm text-slate-500">No results.</li>'; setStatus('0 results'); return; }
-      ul.innerHTML = '';
-      arr.forEach(p=>{
-        const li = document.createElement('li');
-        li.className = 'p-2 border rounded-xl hover:bg-slate-50 cursor-pointer';
-        li.innerHTML = `
-          <div class="flex items-center gap-3">
-            <img src="${p.image_small_url || 'https://static.openfoodfacts.org/images/icons/dist/packaging.svg'}" class="w-10 h-10 rounded border" alt="">
-            <div class="flex-1">
-              <div class="font-medium">${p.product_name || 'Unknown'}</div>
-              <div class="text-xs text-slate-500">${p.brands || ''} · ${p.code}</div>
-            </div>
-          </div>`;
-        li.addEventListener('click', ()=>{
-          $('barcode').value = p.code;
-          setStatus('Selected ' + (p.product_name || 'Unknown') + '. Click Lookup to load details.');
+      return (j.products || []).map(p => ({
+        code: p.code,
+        name: p.product_name || 'Unknown',
+        brand: p.brands || '',
+        image: p.image_small_url
+      }));
+    }
+
+    // ---------- add to log ----------
+    function addCurrentToLog(){
+      if(!currentProduct) return;
+      const grams = Math.max(1, Number($('servGrams').value) || 0);
+      const qty   = Math.max(1, Number($('servQty').value) || 0);
+      const ratio = (grams / 100) * qty;
+      const item = {
+        code: currentProduct.code,
+        name: currentProduct.name,
+        brand: currentProduct.brand,
+        grams, qty,
+        kcal:    (currentProduct.kcal100 ?? 0) * ratio,
+        protein: (currentProduct.prot100 ?? 0) * ratio,
+        carbs:   (currentProduct.carb100 ?? 0) * ratio,
+        fat:     (currentProduct.fat100  ?? 0) * ratio,
+      };
+      const cur = getLog(selectedDate); cur.push(item); setLog(selectedDate, cur);
+      renderLogTable();
+      toast('Added to log');
+    }
+
+    // ---------- tiny toast ----------
+    function toast(msg){
+      const t = document.createElement('div');
+      t.className = 'fixed bottom-4 left-1/2 -translate-x-1/2 bg-slate-900 text-white px-4 py-2 rounded-2xl shadow';
+      t.textContent = msg; document.body.appendChild(t);
+      setTimeout(()=> t.remove(), 1800);
+    }
+
+    // ---------- scanner ----------
+    async function listCameras(){
+      if(!window.ZXing){ setStatus('ZXing not loaded (scanner unavailable)'); return []; }
+      try{
+        const devices = await ZXing.BrowserMultiFormatReader.listVideoInputDevices();
+        $('cameraSelect').innerHTML = '';
+        devices.forEach((d,i)=>{
+          const opt = document.createElement('option');
+          opt.value = d.deviceId; opt.textContent = d.label || `Camera ${i+1}`;
+          $('cameraSelect').appendChild(opt);
         });
-        ul.appendChild(li);
-      });
-      setStatus('Found ' + arr.length + ' result(s)');
-    }catch(e){
-      ul.innerHTML = `<li class="text-sm text-red-600">${e.message}</li>`;
-      setStatus('Search failed: ' + e.message);
-    }
-  });
-
-  // ---- Scanner
-  const video = $('video');
-  const scanStatus = $('scanStatus');
-  const cameraSelect = $('cameraSelect');
-  let scanning = false;
-  let codeReader = null;
-  let currentDeviceId = null;
-
-  function secureOK(){
-    return location.protocol === 'https:' || location.hostname === 'localhost' || location.hostname === '127.0.0.1';
-  }
-
-  async function listCameras(){
-    if(!window.ZXing){ setStatus('ZXing not loaded (scanner unavailable)'); return []; }
-    try{
-      const devices = await ZXing.BrowserMultiFormatReader.listVideoInputDevices();
-      cameraSelect.innerHTML = '';
-      devices.forEach((d,i)=>{
-        const opt = document.createElement('option');
-        opt.value = d.deviceId; opt.textContent = d.label || `Camera ${i+1}`;
-        cameraSelect.appendChild(opt);
-      });
-      if(devices.length){ currentDeviceId = devices.find(d=>/back|rear|environment/i.test(d.label))?.deviceId || devices[0].deviceId; cameraSelect.value = currentDeviceId; }
-      setStatus(`Cameras: ${devices.length}`);
-      return devices;
-    }catch(e){
-      setStatus('Could not list cameras: ' + e.message);
-      return [];
-    }
-  }
-
-  async function startScanner(){
-    if(scanning) return;
-    if(!secureOK()){ scanStatus.textContent = 'Use HTTPS or localhost for camera.'; setStatus('Camera blocked by insecure context'); return; }
-    if(!window.ZXing){ scanStatus.textContent = 'ZXing failed to load; scanner unavailable.'; setStatus('ZXing not loaded'); return; }
-    scanning = true; scanStatus.textContent = 'Requesting camera…'; setStatus('Starting scanner');
-    if(!codeReader) codeReader = new ZXing.BrowserMultiFormatReader();
-
-    try{
-      // ask permission to populate device labels
-      const tmp = await navigator.mediaDevices.getUserMedia({ video: { facingMode: { ideal: 'environment' } } });
-      tmp.getTracks().forEach(t=>t.stop());
-      await listCameras();
-
-      const constraints = currentDeviceId
-        ? { video: { deviceId: { exact: currentDeviceId } } }
-        : { video: { facingMode: { ideal: 'environment' } } };
-
-      await codeReader.decodeFromConstraints(constraints, video, (result, err)=>{
-        if(result){
-          const code = result.getText();
-          scanStatus.textContent = 'Scanned: ' + code;
-          setStatus('Scanned: ' + code);
-          stopScanner();
-          $('barcode').value = code;
+        if(devices.length){
+          currentDeviceId = devices.find(d=>/back|rear|environment/i.test(d.label))?.deviceId || devices[0].deviceId;
+          $('cameraSelect').value = currentDeviceId;
         }
-        if(err && !(err instanceof ZXing.NotFoundException)) {
-          console.warn(err);
-        }
-      });
-      $('btnScan').textContent = 'Stop';
-      scanStatus.textContent = 'Scanner running…';
-    }catch(e){
+        setStatus(`Cameras: ${devices.length}`);
+        return devices;
+      }catch(e){
+        setStatus('Could not list cameras: ' + e.message);
+        return [];
+      }
+    }
+    async function startScanner(){
+      if(scanning) return;
+      if(!secureOK()){
+        $('scanStatus').textContent = 'Use HTTPS or localhost for camera.';
+        setStatus('Camera blocked by insecure context'); return;
+      }
+      if(!window.ZXing){
+        $('scanStatus').textContent = 'ZXing failed to load; scanner unavailable.';
+        setStatus('ZXing not loaded'); return;
+      }
+      scanning = true; $('scanStatus').textContent = 'Requesting camera…'; setStatus('Starting scanner');
+      if(!codeReader) codeReader = new ZXing.BrowserMultiFormatReader();
+      try{
+        const tmp = await navigator.mediaDevices.getUserMedia({ video: { facingMode: { ideal: 'environment' } } });
+        tmp.getTracks().forEach(t=>t.stop());
+        await listCameras();
+        const constraints = currentDeviceId
+          ? { video: { deviceId: { exact: currentDeviceId } } }
+          : { video: { facingMode: { ideal: 'environment' } } };
+
+        await codeReader.decodeFromConstraints(constraints, $('video'), (result, err)=>{
+          if(result){
+            const code = result.getText();
+            $('scanStatus').textContent = 'Scanned: ' + code;
+            setStatus('Scanned: ' + code);
+            stopScanner();
+            $('barcode').value = code;
+            // auto load product after a scan:
+            fetchByBarcode(code).catch(e=> setStatus('Lookup failed: ' + e.message));
+          }
+          if(err && !(err instanceof ZXing.NotFoundException)) console.warn(err);
+        });
+        $('btnScan').textContent = 'Stop';
+        $('scanStatus').textContent = 'Scanner running…';
+      }catch(e){
+        scanning = false; $('btnScan').textContent = 'Start';
+        let msg = 'Failed to start scanner: ' + (e.message || e.name || 'Unknown');
+        if(e.name === 'NotAllowedError') msg = 'Camera permission denied.';
+        if(e.name === 'NotFoundError') msg = 'No camera found.';
+        if(e.name === 'NotReadableError') msg = 'Camera in use by another app.';
+        $('scanStatus').textContent = msg; setStatus(msg);
+      }
+    }
+    function stopScanner(){
+      if(codeReader){ codeReader.reset(); }
       scanning = false; $('btnScan').textContent = 'Start';
-      let msg = 'Failed to start scanner: ' + (e.message || e.name || 'Unknown');
-      if(e.name === 'NotAllowedError') msg = 'Camera permission denied.';
-      if(e.name === 'NotFoundError') msg = 'No camera found.';
-      if(e.name === 'NotReadableError') msg = 'Camera in use by another app.';
-      scanStatus.textContent = msg; setStatus(msg);
+      $('scanStatus').textContent = 'Scanner idle.';
     }
-  }
 
-  function stopScanner(){
-    if(codeReader){ codeReader.reset(); }
-    scanning = false; $('btnScan').textContent = 'Start';
-    scanStatus.textContent = 'Scanner idle.';
-  }
+    // ---------- events ----------
+    $('btnSearch').addEventListener('click', async ()=>{
+      const q = $('q').value.trim();
+      if(!q){ setStatus('Enter a search term'); return; }
+      const ul = $('results'); ul.innerHTML = '<li class="text-sm text-slate-500">Searching…</li>';
+      try{
+        const arr = await searchOFF(q);
+        if(arr.length===0){ ul.innerHTML = '<li class="text-sm text-slate-500">No results.</li>'; setStatus('0 results'); return; }
+        ul.innerHTML = '';
+        arr.forEach(p=>{
+          const li = document.createElement('li');
+          li.className = 'p-2 border rounded-xl hover:bg-slate-50 cursor-pointer';
+          li.innerHTML = `
+            <div class="flex items-center gap-3">
+              <img src="${p.image || 'https://static.openfoodfacts.org/images/icons/dist/packaging.svg'}" class="w-10 h-10 rounded border" alt="">
+              <div class="flex-1">
+                <div class="font-medium">${p.name}</div>
+                <div class="text-xs text-slate-500">${p.brand || ''} · ${p.code}</div>
+              </div>
+            </div>`;
+          li.addEventListener('click', ()=> {
+            // Load full product immediately for logging:
+            fetchByBarcode(p.code).catch(e=> setStatus('Lookup failed: ' + e.message));
+          });
+          ul.appendChild(li);
+        });
+        setStatus('Found ' + arr.length + ' result(s)');
+      }catch(e){
+        ul.innerHTML = `<li class="text-sm text-red-600">${e.message}</li>`;
+        setStatus('Search failed: ' + e.message);
+      }
+    });
 
-  cameraSelect.addEventListener('change', (e)=>{
-    currentDeviceId = e.target.value;
-    if(scanning){ stopScanner(); startScanner(); }
-  });
-  $('btnScan').addEventListener('click', ()=> scanning ? stopScanner() : startScanner());
+    $('btnLookup').addEventListener('click', ()=>{
+      const code = $('barcode').value.trim();
+      if(!code){ setStatus('Enter a barcode first'); return; }
+      fetchByBarcode(code).catch(e=> setStatus('Lookup failed: ' + e.message));
+    });
 
-  // init
-  (async function init(){
-    setStatus('Initializing…');
-    if(!secureOK()){
-      setStatus('Running on non-HTTPS. Scanner will be disabled.');
-      scanStatus.textContent = 'Scanner requires HTTPS or http://localhost.';
-    }
-    await listCameras(); // best-effort; app still works without scanner
-    setStatus('Ready');
-  })();
+    $('btnAdd').addEventListener('click', addCurrentToLog);
+    $('btnClear').addEventListener('click', ()=>{
+      if(confirm('Clear all entries for this day?')){ setLog(selectedDate, []); renderLogTable(); }
+    });
+
+    $('goalInput').addEventListener('change', ()=>{
+      const v = Number($('goalInput').value);
+      if(Number.isFinite(v) && v>0){ goal = Math.round(v); setGoalLS(goal); renderTotals(); }
+    });
+    $('goalInput').addEventListener('input', ()=>{
+      const v = Number($('goalInput').value);
+      if(Number.isFinite(v) && v>0){ goal = v; renderTotals(); }
+    });
+
+    $('datePicker').addEventListener('change', (e)=>{
+      selectedDate = e.target.value; renderLogTable();
+    });
+    $('todayBtn').addEventListener('click', ()=>{
+      selectedDate = new Date().toISOString().slice(0,10);
+      $('datePicker').value = selectedDate; renderLogTable();
+    });
+
+    $('cameraSelect').addEventListener('change', (e)=>{
+      currentDeviceId = e.target.value; if(scanning){ stopScanner(); startScanner(); }
+    });
+    $('btnScan').addEventListener('click', ()=> scanning ? stopScanner() : startScanner());
+
+    // ---------- init ----------
+    (async function init(){
+      // date + goal
+      $('datePicker').value = selectedDate;
+      goal = getGoalLS();
+      $('goalInput').value = goal;
+      renderLogTable();
+
+      if(!secureOK()){
+        $('scanStatus').textContent = 'Scanner needs HTTPS or http://localhost.';
+        setStatus('Running on non-HTTPS; scanner disabled.');
+      }
+      try{ await listCameras(); }catch(e){ console.warn(e); }
+      setStatus('Ready');
+    })();
   </script>
 </body>
 </html>
