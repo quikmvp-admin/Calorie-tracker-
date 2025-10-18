@@ -94,6 +94,7 @@
         <h2 class="text-lg font-semibold mb-3">Find a Product</h2>
         <div class="flex gap-2 mb-3">
           <input id="barcode" type="text" inputmode="numeric" placeholder="Enter barcode (EAN/UPC)" class="flex-1 px-3 py-2 rounded-xl border border-slate-300 bg-white shadow-sm" />
+          <button id="btnPaste" class="px-3 py-2 rounded-2xl border border-slate-300 bg-white">Paste</button>
           <button id="btnLookup" class="px-4 py-2 rounded-2xl bg-slate-900 text-white">Lookup</button>
         </div>
         <div class="flex gap-2">
@@ -173,125 +174,52 @@
     // ---------- helpers ----------
     const $ = (id)=>document.getElementById(id);
     const setStatus = (m)=>{ $('status').textContent = 'Status: ' + m; console.log('[CalTrack]', m); };
+
     const OFF_PRODUCT = (code)=>`https://world.openfoodfacts.org/api/v2/product/${code}.json`;
-  // ----- SMART SEARCH HELPERS -----
-const COUNTRIES_OR = 'en:south-africa|en:united-kingdom|en:united-states';
 
-function norm(s){ return (s||'').toLowerCase(); }
-function tokenize(q){ return norm(q).split(/[^a-z0-9]+/).filter(Boolean); }
+    // Countries filter (comma-separated = OR). Keep broad but biased to SA/UK/US.
+    const COUNTRIES_OR = 'en:south-africa,en:united-kingdom,en:united-states';
 
-// Brand tag guesser (extend as you like)
-function brandTagFromQuery(q){
-  const s = norm(q);
-  if(/(^|\b)coke(\b|$)/.test(s) || /coca\s*-?\s*cola/.test(s)) return 'coca-cola';
-  if(/\bpepsi(co)?\b/.test(s)) return 'pepsi';
-  if(/\bfanta\b/.test(s)) return 'fanta';
-  if(/\bsprite\b/.test(s)) return 'sprite';
-  if(/\bred\s*bull\b/.test(s)) return 'red-bull';
-  if(/\bmonster\b/.test(s)) return 'monster';
-  if(/\bjungle\s*oats\b/.test(s)) return 'jungle-oats'; // SA brand
-  return null;
-}
+    // Robust number parser (handles "3,5" etc.)
+    const parseNum = (v)=>{
+      if (typeof v === 'number') return v;
+      if (typeof v === 'string') {
+        const t = v.trim().replace(',', '.');
+        const n = Number(t);
+        return Number.isFinite(n) ? n : undefined;
+      }
+      return undefined;
+    };
 
-// Category/tag guesser (maps common phrases to OFF category tags)
-function categoryTagsFromQuery(q){
-  const s = norm(q);
-  // juices
-  if(/apple\s+juice/.test(s)) return 'apple-juices|fruit-juices|juices';
-  if(/orange\s+juice/.test(s)) return 'orange-juices|fruit-juices|juices';
-  if(/\b(grape|cranberry|mango)\s+juice\b/.test(s)) return 'fruit-juices|juices';
-  if(/\bjuice(s)?\b/.test(s)) return 'fruit-juices|juices';
-  // oats / cereal
-  if(/\boats?\b/.test(s)) return 'oat-flakes|rolled-oats|cereals|breakfast-cereals';
-  if(/\bcereal(s)?\b/.test(s)) return 'breakfast-cereals|cereals';
-  return null;
-}
-
-// Build a v2 URL with relevance + country filter + optional brand/category tags
-function buildV2Url(q, page=1, pageSize=24){
-  const brand = brandTagFromQuery(q);
-  const cat = categoryTagsFromQuery(q);
-  const params = new URLSearchParams({
-    fields: 'code,product_name,brands,image_small_url',
-    search_terms: q,
-    countries_tags: COUNTRIES_OR,         // SA OR UK OR US
-    page_size: String(pageSize),
-    page: String(page),
-    locale: 'en',
-    nocache: '1',
-    sort_by: 'relevance'
-  });
-  if(brand) params.set('brands_tags_en', brand);
-  if(cat) params.set('categories_tags_en', cat);
-  return `https://world.openfoodfacts.org/api/v2/search?${params.toString()}`;
-}
-
-// Fallback: v1 simple search + explicit country tag groups
-function buildV1Url(q, page=1, pageSize=24){
-  // 3 country tag groups (OR): tagtype_N=countries, tag_contains_N=contains, tag_N=<name>
-  const base = new URLSearchParams({
-    search_terms: q, search_simple: '1', action: 'process', json: '1',
-    page_size: String(pageSize), page: String(page), sort_by: 'product_name', nocache: '1'
-  });
-  const countries = ['south-africa','united-kingdom','united-states'];
-  countries.forEach((c, i)=>{
-    base.set(`tagtype_${i}`, 'countries');
-    base.set(`tag_contains_${i}`, 'contains');
-    base.set(`tag_${i}`, c);
-  });
-  // Optional category narrowing
-  const cat = categoryTagsFromQuery(q);
-  if(cat){
-    const i = countries.length; // next index
-    base.set(`tagtype_${i}`, 'categories');
-    base.set(`tag_contains_${i}`, 'contains');
-    // pick first category for v1 (v1 doesn't support OR pipes in the same param cleanly)
-    base.set(`tag_${i}`, cat.split('|')[0]);
-  }
-  return `https://world.openfoodfacts.org/cgi/search.pl?${base.toString()}`;
-}
-
-// Score results locally to push truly relevant names up-top
-function scoreProduct(p, q){
-  const name = norm(p.product_name);
-  const brands = norm(p.brands);
-  const tokens = tokenize(q);
-  let score = 0;
-
-  // token matches in name/brands
-  tokens.forEach(t=>{
-    if(!t) return;
-    if(name.includes(t)) score += 5;
-    if(brands.includes(t)) score += 3;
-  });
-
-  // exact phrase boost
-  if(name.includes(norm(q))) score += 8;
-
-  // brand hint boost
-  const brandHint = brandTagFromQuery(q);
-  if(brandHint && brands.includes(brandHint.replace(/-/g,' '))) score += 6;
-
-  // category hint boost/penalty
-  const cat = categoryTagsFromQuery(q);
-  if(cat){
-    const c = norm(cat);
-    if(/juice/.test(c)){
-      // prefer beverages/juices; penalize waters when searching juice
-      if(/water|eau|mineral/.test(name)) score -= 6;
-      if(/juice/.test(name)) score += 4;
+    // Quick brand tag guesser
+    function brandTagFromQuery(q){
+      const s = q.trim().toLowerCase();
+      if(/(^|\\b)coke(\\b|$)/.test(s) || /coca\\s*-?\\s*cola/.test(s)) return 'coca-cola';
+      if(/\\bpepsi(co)?\\b/.test(s)) return 'pepsi';
+      if(/\\bfanta\\b/.test(s)) return 'fanta';
+      if(/\\bsprite\\b/.test(s)) return 'sprite';
+      if(/\\bnestl[eé]\\b/.test(s)) return 'nestle';
+      if(/\\bmonster\\b/.test(s)) return 'monster';
+      if(/\\bred\\s*bull\\b/.test(s)) return 'red-bull';
+      return null;
     }
-    if(/oat|cereal/.test(c)){
-      if(/oat|cereal|porridge|muesli|granola/.test(name)) score += 4;
-      if(/water|drink|soda/.test(name)) score -= 3;
+
+    // Build a relevance-first OFF v2 search
+    function OFF_SEARCH(q, page=1, pageSize=24){
+      const brand = brandTagFromQuery(q);
+      const params = new URLSearchParams({
+        fields: 'code,product_name,brands,image_small_url',
+        search_terms: q,
+        page_size: String(pageSize),
+        page: String(page),
+        locale: 'en',
+        nocache: '1',
+        countries_tags: COUNTRIES_OR
+      });
+      // Gentle brand hint; OFF v2 accepts "brands" as a filter
+      if (brand) params.set('brands', brand);
+      return `https://world.openfoodfacts.org/api/v2/search?${params.toString()}`;
     }
-  }
-
-  // small popularity nudge if brand present
-  if(p.brands) score += 1;
-
-  return score;
-}
 
     const secureOK = ()=> location.protocol==='https:' || location.hostname==='localhost' || location.hostname==='127.0.0.1';
     const round1 = n => Math.round(n*10)/10;
@@ -309,6 +237,8 @@ function scoreProduct(p, q){
     const setLog = (d,arr)=> localStorage.setItem(dayKey(d), JSON.stringify(arr));
     const getGoalLS = ()=>{ const v = Number(localStorage.getItem('caltrack:goal')); return Number.isFinite(v)&&v>0? v: 2500; };
     const setGoalLS = (v)=> localStorage.setItem('caltrack:goal', String(Math.round(v)));
+    const getCamLS = ()=> localStorage.getItem('caltrack:camera') || null;
+    const setCamLS = (id)=> localStorage.setItem('caltrack:camera', id || '');
 
     // ---------- UI: product card ----------
     function showProduct(p){
@@ -323,18 +253,26 @@ function scoreProduct(p, q){
       $('carb100').textContent = p.carb100!=null ? `${round1(p.carb100)} g` : '— g';
       $('fat100').textContent  = p.fat100 !=null ? `${round1(p.fat100)} g`  : '— g';
     }
+
     function productFromOFF(data){
       const prod = data?.product || {};
       const n = prod.nutriments || {};
-      const num = (k)=> (typeof n[k]==='number' ? n[k] : (n[k]? Number(n[k]) : undefined));
-      // kcal fallback from kJ
-      const kcal = num('energy-kcal_100g') ?? num('energy-kcal_value') ?? ((num('energy_100g') ?? 0)/4.184);
+      const num = (k)=> parseNum(n[k]);
+
+      // kcal fallback from kJ (1 kcal = 4.184 kJ)
+      const kcalFromKJ = ()=>{
+        const kj = num('energy_100g') ?? num('energy_value');
+        return (typeof kj === 'number') ? (kj / 4.184) : undefined;
+      };
+
+      const kcal = num('energy-kcal_100g') ?? num('energy-kcal_value') ?? kcalFromKJ();
+
       return {
         code: prod.code,
         name: prod.product_name || prod.generic_name || 'Unknown',
         brand: (prod.brands || '').split(',').map(s=>s.trim()).filter(Boolean).join(', '),
         image: prod.image_front_small_url || prod.image_small_url || prod.image_url,
-        kcal100: kcal ?? undefined,
+        kcal100: (typeof kcal === 'number') ? kcal : undefined,
         prot100: num('proteins_100g'),
         carb100: num('carbohydrates_100g'),
         fat100:  num('fat_100g'),
@@ -358,6 +296,7 @@ function scoreProduct(p, q){
       $('goalRemaining').textContent = diff >= 0 ? `${diff} kcal remaining` : `${Math.abs(diff)} kcal over`;
       $('goalBar').className = 'h-full rounded-full ' + (diff>=0 ? 'bg-emerald-600':'bg-red-500');
     }
+
     function renderLogTable(){
       const tbody = $('logBody'); tbody.innerHTML = '';
       const items = getLog(selectedDate);
@@ -433,7 +372,6 @@ function scoreProduct(p, q){
               </div>
             </div>`;
           li.addEventListener('click', ()=> {
-            // Load full product immediately for logging:
             fetchByBarcode(p.code).catch(e=> setStatus('Lookup failed: ' + e.message));
           });
           ul.appendChild(li);
@@ -506,10 +444,15 @@ function scoreProduct(p, q){
           opt.value = d.deviceId; opt.textContent = d.label || `Camera ${i+1}`;
           $('cameraSelect').appendChild(opt);
         });
-        if(devices.length){
-          currentDeviceId = devices.find(d=>/back|rear|environment/i.test(d.label))?.deviceId || devices[0].deviceId;
-          $('cameraSelect').value = currentDeviceId;
-        }
+
+        // Prefer stored camera, else rear/environment, else first
+        const stored = getCamLS();
+        currentDeviceId =
+          devices.find(d => d.deviceId === stored)?.deviceId ||
+          devices.find(d => /back|rear|environment/i.test(d.label))?.deviceId ||
+          devices[0]?.deviceId || null;
+
+        if(currentDeviceId){ $('cameraSelect').value = currentDeviceId; }
         setStatus(`Cameras: ${devices.length}`);
         return devices;
       }catch(e){
@@ -517,6 +460,7 @@ function scoreProduct(p, q){
         return [];
       }
     }
+
     async function startScanner(){
       if(scanning) return;
       if(!secureOK()){
@@ -530,12 +474,15 @@ function scoreProduct(p, q){
       scanning = true; $('scanStatus').textContent = 'Requesting camera…'; setStatus('Starting scanner');
       if(!codeReader) codeReader = new ZXing.BrowserMultiFormatReader();
       try{
-        const tmp = await navigator.mediaDevices.getUserMedia({ video: { facingMode: { ideal: 'environment' } } });
+        // Kick permission to reveal device labels
+        const tmp = await navigator.mediaDevices.getUserMedia({ video: { facingMode: { ideal: 'environment' } }, audio: false });
         tmp.getTracks().forEach(t=>t.stop());
-        await listCameras();
+
+        const devices = await listCameras();
+
         const constraints = currentDeviceId
-          ? { video: { deviceId: { exact: currentDeviceId } } }
-          : { video: { facingMode: { ideal: 'environment' } } };
+          ? { video: { deviceId: { exact: currentDeviceId } }, audio: false }
+          : { video: { facingMode: { ideal: 'environment' } }, audio: false };
 
         await codeReader.decodeFromConstraints(constraints, $('video'), (result, err)=>{
           if(result){
@@ -559,6 +506,7 @@ function scoreProduct(p, q){
         $('scanStatus').textContent = msg; setStatus(msg);
       }
     }
+
     function stopScanner(){
       if(codeReader){ codeReader.reset(); }
       scanning = false; $('btnScan').textContent = 'Start';
@@ -570,10 +518,9 @@ function scoreProduct(p, q){
     $('btnSearch').addEventListener('click', async ()=>{
       const q = $('q').value.trim();
       if(!q){ setStatus('Enter a search term'); return; }
-      // reset state for new query
       searchState = { q, page:1, pageSize:24, loading:false, done:false };
       $('results').innerHTML = '<li class="text-sm text-slate-500">Searching…</li>';
-      const more = $('loadMore'); if(more) more.remove(); // remove old button
+      const more = $('loadMore'); if(more) more.remove();
       await loadMoreResults(true);
     });
     $('q').addEventListener('keydown', (e)=>{ if(e.key==='Enter') $('btnSearch').click(); });
@@ -583,6 +530,15 @@ function scoreProduct(p, q){
       const code = $('barcode').value.trim();
       if(!code){ setStatus('Enter a barcode first'); return; }
       fetchByBarcode(code).catch(e=> setStatus('Lookup failed: ' + e.message));
+    });
+    $('barcode').addEventListener('keydown', (e)=>{ if(e.key==='Enter') $('btnLookup').click(); });
+
+    // Paste helper
+    $('btnPaste').addEventListener('click', async ()=>{
+      try{
+        const text = await navigator.clipboard.readText();
+        if(text){ $('barcode').value = text.trim(); toast('Pasted'); }
+      }catch(e){ toast('Clipboard denied'); }
     });
 
     // Log actions
@@ -612,7 +568,8 @@ function scoreProduct(p, q){
 
     // Camera controls
     $('cameraSelect').addEventListener('change', (e)=>{
-      currentDeviceId = e.target.value; if(scanning){ stopScanner(); startScanner(); }
+      currentDeviceId = e.target.value; setCamLS(currentDeviceId);
+      if(scanning){ stopScanner(); startScanner(); }
     });
     $('btnScan').addEventListener('click', ()=> scanning ? stopScanner() : startScanner());
 
@@ -627,7 +584,9 @@ function scoreProduct(p, q){
         $('scanStatus').textContent = 'Scanner needs HTTPS or http://localhost.';
         setStatus('Running on non-HTTPS; scanner disabled.');
       }
-      try{ await listCameras(); }catch(e){ console.warn(e); }
+      try{
+        await listCameras();
+      }catch(e){ console.warn(e); }
       setStatus('Ready');
     })();
   </script>
